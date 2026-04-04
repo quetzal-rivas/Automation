@@ -72,16 +72,23 @@ def lambda_handler(event, context):
 
         # Trigger ElevenLabs call
         elevenlabs_response = trigger_elevenlabs_call(agent_id, session_id, summary, webhook_url)
+        call_id = elevenlabs_response.get('call_id') or elevenlabs_response.get('conversation_id')
+
+        response_body = {
+            'session_id': session_id,
+            'status': 'CALL_IN_PROGRESS',
+            'message': f'Call initiated for agent {agent_id}',
+            'elevenlabs_call_id': call_id
+        }
+
+        # Surface ElevenLabs error directly in the response if the call failed
+        if not call_id:
+            response_body['elevenlabs_debug'] = elevenlabs_response
 
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({
-                'session_id': session_id,
-                'status': 'CALL_IN_PROGRESS',
-                'message': f'Call initiated for agent {agent_id}',
-                'elevenlabs_call_id': elevenlabs_response.get('call_id')
-            })
+            'body': json.dumps(response_body)
         }
 
     except Exception as e:
