@@ -126,6 +126,7 @@ Resources:
             FunctionArn: !GetAtt AuthorizerFunction.Arn
             Identity:
               Header: Authorization
+            ReauthorizeEvery: 0
 
   AuthorizerFunction:
     Type: AWS::Serverless::Function
