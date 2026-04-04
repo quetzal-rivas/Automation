@@ -3,8 +3,10 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 
+import os
+
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table('agent-directive-hub')
+table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE', 'agent-directive-hub'))
 
 def lambda_handler(event, context):
     try:
