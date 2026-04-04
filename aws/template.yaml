@@ -10,6 +10,9 @@ Parameters:
   ElevenLabsAgentId:
     Type: String
     Description: ElevenLabs Agent/Voice ID
+  ElevenLabsPhoneNumberId:
+    Type: String
+    Description: ElevenLabs Phone Number ID (e.g. phnum_xxxx) for outbound calls
   UserPhoneNumber:
     Type: String
     Description: Your phone number for receiving calls
@@ -147,6 +150,7 @@ Resources:
         Variables:
           ELEVENLABS_API_KEY: !Ref ElevenLabsApiKey
           ELEVENLABS_AGENT_ID: !Ref ElevenLabsAgentId
+          ELEVENLABS_PHONE_NUMBER_ID: !Ref ElevenLabsPhoneNumberId
           USER_PHONE_NUMBER: !Ref UserPhoneNumber
       Events:
         TriggerCallApi:

@@ -99,13 +99,13 @@ def trigger_elevenlabs_call(agent_id, session_id, summary, webhook_url):
     api_key = os.environ['ELEVENLABS_API_KEY']
     agent_voice_id = os.environ['ELEVENLABS_AGENT_ID']
     phone_number = os.environ['USER_PHONE_NUMBER']
+    phone_number_id = os.environ.get('ELEVENLABS_PHONE_NUMBER_ID', '')
 
     headers = {
         'xi-api-key': api_key,
         'Content-Type': 'application/json'
     }
 
-    # Main system prompt — the scheduling instructions are appended at the end
     system_prompt = f"""You are calling on behalf of the AI agent named "{agent_id}".
 
 The agent has the following update: {summary}
@@ -120,11 +120,22 @@ After confirming the directive:
         'agent_id': agent_voice_id,
         'customer_phone_number': phone_number,
         'system_prompt': system_prompt,
-        'webhook_url': f"{webhook_url}?agent_id={agent_id}&session_id={session_id}",
         'max_duration_seconds': 300,
         'wait_for_greeting': True,
         'record_call': True
     }
+
+    # Add phone number ID (required when ElevenLabs account has Twilio integration)
+    if phone_number_id:
+        payload['phone_number_id'] = phone_number_id
+
+    # Add webhook URL if available
+    if webhook_url:
+        payload['webhook_url'] = f"{webhook_url}?agent_id={agent_id}&session_id={session_id}"
+
+    print(f"[ElevenLabs] Triggering call to {phone_number} via agent {agent_voice_id}")
+    print(f"[ElevenLabs] Webhook URL: {payload.get('webhook_url', 'NOT SET')}")
+    print(f"[ElevenLabs] Phone number ID: {phone_number_id or 'NOT SET'}")
 
     response = requests.post(
         'https://api.elevenlabs.io/v1/convai/conversations/phone',
@@ -132,4 +143,17 @@ After confirming the directive:
         json=payload
     )
 
-    return response.json() if response.status_code == 200 else {}
+    print(f"[ElevenLabs] Response status: {response.status_code}")
+    try:
+        response_body = response.json()
+    except Exception:
+        response_body = {'raw': response.text}
+
+    print(f"[ElevenLabs] Response body: {json.dumps(response_body)}")
+
+    if response.status_code == 200:
+        return response_body
+    else:
+        print(f"[ElevenLabs] ERROR! Call failed. Status={response.status_code} Body={response_body}")
+        return {}
+
