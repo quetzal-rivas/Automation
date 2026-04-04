@@ -125,27 +125,31 @@ After confirming the directive:
 
     payload = {
         'agent_id': agent_voice_id,
-        'customer_phone_number': phone_number,
-        'system_prompt': system_prompt,
-        'max_duration_seconds': 300,
-        'wait_for_greeting': True,
-        'record_call': True
+        'agent_phone_number_id': phone_number_id,
+        'to_number': phone_number,
     }
 
-    # Add phone number ID (required when ElevenLabs account has Twilio integration)
-    if phone_number_id:
-        payload['phone_number_id'] = phone_number_id
+    # Pass dynamic variables to the agent (accessible in the prompt as {{variable_name}})
+    payload['conversation_config_override'] = {
+        'agent': {
+            'prompt': {
+                'prompt': system_prompt
+            }
+        }
+    }
 
     # Add webhook URL if available
     if webhook_url:
-        payload['webhook_url'] = f"{webhook_url}?agent_id={agent_id}&session_id={session_id}"
+        payload['conversation_config_override']['webhook'] = {
+            'url': f"{webhook_url}?agent_id={agent_id}&session_id={session_id}"
+        }
 
     print(f"[ElevenLabs] Triggering call to {phone_number} via agent {agent_voice_id}")
-    print(f"[ElevenLabs] Webhook URL: {payload.get('webhook_url', 'NOT SET')}")
     print(f"[ElevenLabs] Phone number ID: {phone_number_id or 'NOT SET'}")
+    print(f"[ElevenLabs] Webhook URL: {payload['conversation_config_override'].get('webhook', {}).get('url', 'NOT SET')}")
 
     response = requests.post(
-        'https://api.elevenlabs.io/v1/convai/conversations/phone',
+        'https://api.elevenlabs.io/v1/convai/twilio/outbound-call',
         headers=headers,
         json=payload
     )
@@ -162,5 +166,5 @@ After confirming the directive:
         return response_body
     else:
         print(f"[ElevenLabs] ERROR! Call failed. Status={response.status_code} Body={response_body}")
-        return {}
+        return response_body  # Return the error body so it surfaces in elevenlabs_debug
 
