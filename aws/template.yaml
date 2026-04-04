@@ -148,7 +148,6 @@ Resources:
           ELEVENLABS_API_KEY: !Ref ElevenLabsApiKey
           ELEVENLABS_AGENT_ID: !Ref ElevenLabsAgentId
           USER_PHONE_NUMBER: !Ref UserPhoneNumber
-          API_DOMAIN: !Sub '${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com'
       Events:
         TriggerCallApi:
           Type: Api
