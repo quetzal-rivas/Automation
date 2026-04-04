@@ -139,7 +139,6 @@ Resources:
       Environment:
         Variables:
           API_BEARER_TOKEN: !Ref ApiBearerToken
-
   TriggerCallFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -160,6 +159,22 @@ Resources:
             RestApiId: !Ref ApiGatewayApi
             Path: /trigger-call
             Method: post
+
+
+  GetStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-get-status-${AWS::StackName}"
+      CodeUri: src/get_status/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        GetStatusApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /get-status
+            Method: get
 
   WebhookHandlerFunction:
     Type: AWS::Serverless::Function
