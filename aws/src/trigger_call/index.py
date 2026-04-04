@@ -39,8 +39,13 @@ def lambda_handler(event, context):
             }
         )
         
+        # Construct Webhook URL dynamically
+        domain_name = event.get('requestContext', {}).get('domainName')
+        stage = event.get('requestContext', {}).get('stage', 'prod')
+        webhook_url = f"https://{domain_name}/{stage}/webhook" if domain_name else ''
+        
         # Trigger ElevenLabs call
-        elevenlabs_response = trigger_elevenlabs_call(agent_id, session_id, summary)
+        elevenlabs_response = trigger_elevenlabs_call(agent_id, session_id, summary, webhook_url)
         
         return {
             'statusCode': 200,
@@ -61,13 +66,12 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': 'Internal server error'})
         }
 
-def trigger_elevenlabs_call(agent_id, session_id, summary):
+def trigger_elevenlabs_call(agent_id, session_id, summary, webhook_url):
     """Trigger ElevenLabs outbound call"""
     
     # ElevenLabs API configuration
     api_key = os.environ['ELEVENLABS_API_KEY']
     agent_voice_id = os.environ['ELEVENLABS_AGENT_ID']
-    webhook_url = os.environ['WEBHOOK_URL']
     phone_number = os.environ['USER_PHONE_NUMBER']
     
     headers = {
