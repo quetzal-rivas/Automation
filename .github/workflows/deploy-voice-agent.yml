@@ -45,5 +45,6 @@ jobs:
             --parameter-overrides \
               ElevenLabsApiKey=${{ secrets.ELEVENLABS_API_KEY }} \
               ElevenLabsAgentId=${{ secrets.ELEVENLABS_AGENT_ID }} \
+              ElevenLabsPhoneNumberId=${{ secrets.ELEVENLABS_PHONE_NUMBER_ID }} \
               UserPhoneNumber=${{ secrets.USER_PHONE_NUMBER }} \
               ApiBearerToken=${{ secrets.API_BEARER_TOKEN }}

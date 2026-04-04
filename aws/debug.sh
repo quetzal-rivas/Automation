@@ -8,7 +8,11 @@
 AGENT_ID="${1:-vscode-macbook-pro}"
 SINCE_MINUTES="${2:-60}"
 REGION="us-east-2"
-TABLE="agent-directive-hub"
+STACK_NAME="voice-agent-hub"
+TABLE="agent-directive-hub-${STACK_NAME}"
+FUNC_TRIGGER="agent-directive-trigger-call-${STACK_NAME}"
+FUNC_WEBHOOK="agent-directive-webhook-handler-${STACK_NAME}"
+FUNC_DIRECTIVE="agent-directive-get-directive-${STACK_NAME}"
 BEARER_TOKEN="${BEARER_TOKEN:-123456789}"
 API_URL="https://mrdbw1d3e9.execute-api.us-east-2.amazonaws.com/prod"
 
@@ -49,18 +53,16 @@ fi
 
 # ── 2. DynamoDB — Latest Records ─────────────────────────────────────────────
 header "2. DynamoDB — Detecting Active Table"
-# Find the correct table — could be with or without the stack suffix
+# Check for both possible table names (with and without stack suffix)
 ALL_TABLES=$(aws dynamodb list-tables --region "$REGION" --query "TableNames" --output text 2>&1)
 echo "All tables in $REGION:"
 echo "$ALL_TABLES" | tr '\t' '\n' | sed 's/^/  • /'
 
-# Try to find the directive hub table
-TABLE=$(echo "$ALL_TABLES" | tr '\t' '\n' | grep -i "agent-directive-hub" | head -1)
-if [ -z "$TABLE" ]; then
-  TABLE="agent-directive-hub"
-  echo -e "${YELLOW}  ⚠ No agent-directive-hub table found — using default: $TABLE${NC}"
-else
+# Prefer the stack-suffixed table, fall back to base name
+if echo "$ALL_TABLES" | grep -q "$TABLE"; then
   echo -e "${GREEN}  ✓ Found table: $TABLE${NC}"
+else
+  echo -e "${YELLOW}  ⚠ Table '$TABLE' not visible locally (may be in the SAM account) — API calls will still work${NC}"
 fi
 
 # ── 3. DynamoDB — Latest Records ─────────────────────────────────────────────
@@ -109,11 +111,11 @@ except Exception as e:
 " 2>/dev/null || echo -e "${RED}  Could not scan DynamoDB${NC}"
 
 # ── 4. Lambda — Direct Invocation Test ───────────────────────────────────────
-header "4. Lambda — Direct Invocation Test (trigger-call)"
+header "4. Lambda — Direct Invocation Test (trigger-call: $FUNC_TRIGGER)"
 echo "Directly invoking Lambda with test payload..."
 INVOKE_RESULT=$(aws lambda invoke \
   --region "$REGION" \
-  --function-name "agent-directive-trigger-call" \
+  --function-name "$FUNC_TRIGGER" \
   --payload '{"agent_id":"debug-test","summary":"Debug invocation test — checking ElevenLabs connectivity"}' \
   --cli-binary-format raw-in-base64-out \
   --log-type Tail \
@@ -142,7 +144,7 @@ fi
 
 # ── 5. CloudWatch Logs (if available) ────────────────────────────────────────
 header "5. CloudWatch Logs — Last ${SINCE_MINUTES}m"
-LOG_GROUP="/aws/lambda/agent-directive-trigger-call"
+LOG_GROUP="/aws/lambda/$FUNC_TRIGGER"
 echo "Checking log group: $LOG_GROUP"
 aws logs tail "$LOG_GROUP" \
   --region "$REGION" \
@@ -150,13 +152,24 @@ aws logs tail "$LOG_GROUP" \
   --format short 2>&1 || echo -e "${YELLOW}  ℹ No log group found (Lambda may not have logged yet)${NC}"
 
 # ── 6. Lambda — Environment Check ────────────────────────────────────────────
-header "6. Lambda — Environment Variable Audit"
+header "6. Lambda — Environment Variable Audit ($FUNC_TRIGGER)"
 echo "Checking trigger-call function config..."
 aws lambda get-function-configuration \
   --region "$REGION" \
-  --function-name "agent-directive-trigger-call" \
-  --query "{Runtime:Runtime, Role:Role, EnvKeys:join(',', keys(Environment.Variables || `{}`))}" \
-  --output table 2>&1 || echo -e "${RED}  Could not get function config${NC}"
+  --function-name "$FUNC_TRIGGER" \
+  --output json 2>&1 | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(f\"  Runtime : {d.get('Runtime','?')}\")
+    print(f\"  Role    : {d.get('Role','?')}\")
+    env = d.get('Environment', {}).get('Variables', {})
+    print(f\"  Env keys: {', '.join(env.keys())}\")
+except Exception as e:
+    # Might be an error message (not JSON)
+    raw = sys.stdin.read()
+    print(f'  {raw or e}')
+" 2>/dev/null || echo -e "${RED}  Could not get function config${NC}"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 sep
