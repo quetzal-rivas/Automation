@@ -88,6 +88,26 @@ Resources:
                 Resource: 
                   - !GetAtt AgentDirectiveTable.Arn
                   - !Sub "${AgentDirectiveTable.Arn}/index/*"
+        - PolicyName: EventBridgeScheduling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:DeleteRule
+                  - events:RemoveTargets
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/callback-*'
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*'
+              - Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                Resource: '*'
 
   # SAM uses implicit API creation when you define events. 
   # But we also have a custom authorizer.
@@ -128,6 +148,7 @@ Resources:
           ELEVENLABS_API_KEY: !Ref ElevenLabsApiKey
           ELEVENLABS_AGENT_ID: !Ref ElevenLabsAgentId
           USER_PHONE_NUMBER: !Ref UserPhoneNumber
+          API_DOMAIN: !Sub '${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com'
       Events:
         TriggerCallApi:
           Type: Api
@@ -143,6 +164,9 @@ Resources:
       CodeUri: src/webhook_handler/
       Handler: index.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TRIGGER_CALL_FUNCTION_ARN: !GetAtt TriggerCallFunction.Arn
       Events:
         WebhookApi:
           Type: Api
