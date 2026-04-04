@@ -8,6 +8,8 @@
 AGENT_ID="${1:-vscode-macbook-pro}"
 SINCE_MINUTES="${2:-60}"
 REGION="us-east-2"
+AWS_PROFILE="voice-agent"
+export AWS_PROFILE
 STACK_NAME="voice-agent-hub"
 TABLE="agent-directive-hub-${STACK_NAME}"
 FUNC_TRIGGER="agent-directive-trigger-call-${STACK_NAME}"
