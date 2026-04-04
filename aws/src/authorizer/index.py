@@ -12,7 +12,12 @@ def lambda_handler(event, context):
     expected_token = os.environ['API_BEARER_TOKEN']
     
     if token == expected_token:
-        return generate_policy('user', 'Allow', event['methodArn'])
+        # Allow access to all methods in this API (wildcard resource)
+        # This prevents stale per-method cache misses
+        arn_parts = event['methodArn'].split(':')
+        api_gateway_arn = ':'.join(arn_parts[:6])
+        resource = f"{api_gateway_arn}/*/*"
+        return generate_policy('user', 'Allow', resource)
     else:
         return generate_policy('user', 'Deny', event['methodArn'])
 
