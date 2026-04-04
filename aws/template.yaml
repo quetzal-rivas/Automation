@@ -128,7 +128,6 @@ Resources:
           ELEVENLABS_API_KEY: !Ref ElevenLabsApiKey
           ELEVENLABS_AGENT_ID: !Ref ElevenLabsAgentId
           USER_PHONE_NUMBER: !Ref UserPhoneNumber
-          WEBHOOK_URL: !Sub 'https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/webhook'
       Events:
         TriggerCallApi:
           Type: Api
