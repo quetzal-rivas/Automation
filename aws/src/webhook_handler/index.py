@@ -305,51 +305,45 @@ def resolve_day_phrase(transcript, now):
 
 
 def schedule_followup_call(agent_id, summary, callback_time_iso):
-    """Create a one-time AWS EventBridge rule to trigger a follow-up call at the scheduled time."""
+    """Create a one-time AWS EventBridge Schedule to trigger a follow-up call."""
     trigger_fn_arn = os.environ.get('TRIGGER_CALL_FUNCTION_ARN')
     if not trigger_fn_arn:
-        print("TRIGGER_CALL_FUNCTION_ARN not set — skipping EventBridge schedule")
+        print("TRIGGER_CALL_FUNCTION_ARN not set — skipping scheduler")
         return
 
-    # Parse the ISO time and format as EventBridge cron (UTC)
-    dt = datetime.fromisoformat(callback_time_iso.replace('Z', '+00:00'))
-    cron_expr = f"cron({dt.minute} {dt.hour} {dt.day} {dt.month} ? {dt.year})"
+    # Initialize scheduler client
+    scheduler = boto3.client('scheduler')
+    
+    # Parse and format for Amazon EventBridge Scheduler 'at' expression
+    # ISO: 2026-04-05T10:35:00.000000+00:00 -> at(2026-04-05T10:35:00)
+    dt = datetime.fromisoformat(callback_time_iso)
+    at_expression = f"at({dt.strftime('%Y-%m-%dT%H:%M:%S')})"
+    
+    schedule_name = f"cb-{agent_id}-{uuid.uuid4().hex[:8]}"
+    role_arn = "arn:aws:iam::229198161564:role/DirectiveHubSchedulerRole"
 
-    rule_name = f"callback-{agent_id}-{uuid.uuid4().hex[:8]}"
-
-    events_client.put_rule(
-        Name=rule_name,
-        ScheduleExpression=cron_expr,
-        State='ENABLED',
-        Description=f'Scheduled callback for {agent_id} at {callback_time_iso}'
-    )
-
-    events_client.put_targets(
-        Rule=rule_name,
-        Targets=[{
-            'Id': 'TriggerCallTarget',
-            'Arn': trigger_fn_arn,
-            'Input': json.dumps({
-                'agent_id': agent_id,
-                'summary': summary,
-                'scheduled_by': rule_name
-            })
-        }]
-    )
-
-    # Allow EventBridge to invoke the Lambda
     try:
-        lambda_client.add_permission(
-            FunctionName=trigger_fn_arn,
-            StatementId=f'eventbridge-{rule_name}',
-            Action='lambda:InvokeFunction',
-            Principal='events.amazonaws.com',
-            SourceArn=f"arn:aws:events:{os.environ.get('AWS_REGION', 'us-east-2')}:{get_account_id()}:rule/{rule_name}"
+        scheduler.create_schedule(
+            Name=schedule_name,
+            ActionAfterCompletion='DELETE',
+            ScheduleExpression=at_expression,
+            ScheduleExpressionTimezone='UTC',
+            Target={
+                'Arn': trigger_fn_arn,
+                'RoleArn': role_arn,
+                'Input': json.dumps({
+                    'agent_id': agent_id,
+                    'summary': f"[Scheduled] {summary}",
+                    'scheduled_by': schedule_name
+                })
+            },
+            Description=f'Scheduled callback for {agent_id} at {callback_time_iso}'
         )
-    except lambda_client.exceptions.ResourceConflictException:
-        pass  # Permission already exists
-
-    print(f"Scheduled follow-up call for {agent_id} at {callback_time_iso} via rule {rule_name}")
+        print(f"Successfully scheduled follow-up for {agent_id} at {at_expression} (UTC) via Scheduler Name: {schedule_name}")
+    except Exception as e:
+        print(f"Error creating schedule: {str(e)}")
+        # If scheduler fails, try immediate as fallback
+        trigger_immediate_callback(agent_id, summary)
 
 
 def trigger_immediate_callback(agent_id, summary):
