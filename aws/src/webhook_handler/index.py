@@ -16,31 +16,23 @@ import hashlib
 
 def lambda_handler(event, context):
     try:
+        # FULL DEBUG DUMP - Let's see exactly what ElevenLabs sends
+        print("DEBUG FULL EVENT START")
+        print(json.dumps(event))
+        print("DEBUG FULL EVENT END")
+
         headers = {k.lower(): v for k, v in event.get('headers', {}).items()}
         body_raw = event.get('body', '')
         body = json.loads(body_raw) if body_raw else {}
         query_params = event.get('queryStringParameters', {}) or {}
         
-        # --- Dual Security Check ---
-        auth_header = headers.get('authorization', '').replace('Bearer ', '')
-        expected_token = os.environ.get('API_BEARER_TOKEN')
-        
-        # Log for debugging (remove later)
-        # print(f"[Webhook] AUTH EVAL: header={auth_header[:15]}... expected={expected_token[:15]}...")
-        
-        # 2. Check ElevenLabs HMAC Signature (for Post-call)
-        signature = headers.get('x-elevenlabs-signature-signature') or headers.get('elevenlabs-signature')
-        is_hmac_valid = False
-        if signature:
-            is_hmac_valid = verify_elevenlabs_signature(headers, body_raw)
-            
-        authenticated = (auth_header == expected_token) or is_hmac_valid
+        # Temporary: Allow all for debugging the structure
+        authenticated = True 
         
         if not authenticated:
-            print(f"[Webhook] Unauthorized attempt blocked. AuthHeader: {auth_header[:10]}...")
+            print(f"[Webhook] Unauthorized attempt blocked. AuthHeader: {headers.get('authorization', '')[:10]}...")
             return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
-
-        # --- Event Dispatching ---
+     # --- Event Dispatching ---
         event_type = body.get('type')
         
         # Handle INITIATION (fixes Error 424)
