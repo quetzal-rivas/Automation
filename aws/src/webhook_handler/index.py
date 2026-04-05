@@ -74,25 +74,33 @@ def lambda_handler(event, context):
 
 def verify_elevenlabs_signature(headers, body_raw):
     """
-    Verify ElevenLabs HMAC signature using the shared secret.
-    Expected headers: x-elevenlabs-signature-timestamp and x-elevenlabs-signature-signature
+    Verify ElevenLabs HMAC signature parsing the ElevenLabs-Signature header.
+    Format: t=TIMESTAMP,v1=SIGNATURE
     """
     secret = os.environ.get('ELEVENLABS_WEBHOOK_SECRET')
-    if not secret:
-        print("[Auth] Missing ELEVENLABS_WEBHOOK_SECRET env var.")
+    sig_header = headers.get('elevenlabs-signature') or headers.get('x-elevenlabs-signature')
+    
+    if not secret or not sig_header:
+        print(f"[Auth] Missing secret={bool(secret)} or header={bool(sig_header)}")
         return False
         
-    timestamp = headers.get('x-elevenlabs-signature-timestamp')
-    signature = headers.get('x-elevenlabs-signature-signature')
-    
-    if not timestamp or not signature:
-        return False
+    try:
+        # ElevenLabs-Signature: t=123456,v1=abcdef...
+        parts = dict(x.split('=') for x in sig_header.split(','))
+        timestamp = parts.get('t')
+        signature = parts.get('v1')
         
-    # Signature = hmac_sha256(secret, timestamp + body)
-    message = timestamp + body_raw
-    expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
-    
-    return hmac.compare_digest(expected_sig, signature)
+        if not timestamp or not signature:
+            return False
+            
+        # Signature = hmac_sha256(secret, timestamp + body)
+        message = timestamp + body_raw
+        expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+        
+        return hmac.compare_digest(expected_sig, signature)
+    except Exception as e:
+        print(f"[Auth] Signature parse error: {str(e)}")
+        return False
 
 def handle_initiation(query_params, body):
     """Responds to conversation initiation with our local session variables."""
