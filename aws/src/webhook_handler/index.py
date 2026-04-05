@@ -22,29 +22,31 @@ def lambda_handler(event, context):
         query_params = event.get('queryStringParameters', {}) or {}
         
         # --- Dual Security Check ---
-        auth_header = headers.get('authorization', '').replace('Bearer ', '').strip()
-        expected_token = os.environ.get('API_BEARER_TOKEN', '').strip()
+        auth_header = headers.get('authorization', '')
+        expected_token = f"Bearer {os.environ.get('API_BEARER_TOKEN')}"
+        
+        # Log for debugging (remove later)
+        print(f"[Webhook] AUTH EVAL: header={auth_header[:15]}... expected={expected_token[:15]}...")
+        print(f"[Webhook] EVENT: type={body.get('type')} keys={list(body.keys())}")
         
         # 2. Check ElevenLabs HMAC Signature (for Post-call)
         signature = headers.get('x-elevenlabs-signature-signature') or headers.get('elevenlabs-signature')
         is_hmac_valid = False
         if signature:
             is_hmac_valid = verify_elevenlabs_signature(headers, body_raw)
+            print(f"[Webhook] HMAC VALID: {is_hmac_valid}")
             
-        # Authenticated if either static token matches or HMAC signature matches
         authenticated = (auth_header == expected_token) or is_hmac_valid
         
         if not authenticated:
+            print(f"[Webhook] Unauthorized attempt blocked. AuthHeader: {auth_header[:10]}...")
             return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
 
         # --- Event Dispatching ---
         event_type = body.get('type')
         
-        # Determine if this is an initiation request even if 'type' is missing
-        is_initiation = (event_type == "conversation_initiation_client_data") or \
-                        (not event_type and 'conversation_id' in body and 'agent_id' in body)
-        
-        if is_initiation:
+        # Handle INITIATION
+        if event_type == "conversation_initiation_client_data":
             return handle_initiation(query_params, body)
             
         # Handle POST-CALL TRANSCRIPTION
