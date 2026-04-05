@@ -11,76 +11,101 @@ events_client = boto3.client('events')
 lambda_client = boto3.client('lambda')
 
 
+import hmac
+import hashlib
+
 def lambda_handler(event, context):
     try:
-        body = json.loads(event['body']) if event.get('body') else {}
+        headers = {k.lower(): v for k, v in event.get('headers', {}).items()}
+        body_raw = event.get('body', '')
+        body = json.loads(body_raw) if body_raw else {}
         query_params = event.get('queryStringParameters', {}) or {}
         
-        # Determine event type - ElevenLabs sends 'type' for lifecycle events
+        # --- Dual Security Check ---
+        # 1. Check Bearer Token (for Initiation and manual calls)
+        auth_header = headers.get('authorization', '')
+        expected_token = f"Bearer {os.environ.get('API_BEARER_TOKEN')}"
+        
+        # 2. Check ElevenLabs HMAC Signature (for Post-call)
+        signature = headers.get('x-elevenlabs-signature-signature') or headers.get('elevenlabs-signature')
+        is_hmac_valid = False
+        if signature:
+            is_hmac_valid = verify_elevenlabs_signature(headers, body_raw)
+            
+        authenticated = (auth_header == expected_token) or is_hmac_valid
+        
+        if not authenticated:
+            print("[Webhook] Unauthorized attempt blocked.")
+            return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
+
+        # --- Event Dispatching ---
         event_type = body.get('type')
         
-        # 1. Handle CONVERSATION INITIATION (Fixes Error 424)
+        # Handle INITIATION
         if event_type == "conversation_initiation_client_data":
             return handle_initiation(query_params, body)
             
-        # 2. Handle POST-CALL TRANSCRIPTION (Call Finished)
+        # Handle POST-CALL TRANSCRIPTION
         if event_type == "post_call_transcription":
             return handle_post_call(body)
 
-        # 3. Handle DIRECT TOOL CALLS (save_directive, schedule_call)
-        # Extraction: prioritize query params (original design), fall back to body (ElevenLabs tool design)
+        # Handle DIRECT TOOL CALLS
         agent_id = query_params.get('agent_id') or body.get('agent_id')
         session_id = query_params.get('session_id') or body.get('session_id')
 
         if not agent_id or not session_id:
-            # If it's another ElevenLabs event type we don't handle yet, just 200 OK
-            if event_type:
+            if event_type: # Ignore other lifecycle events we don't need
                 return {'statusCode': 200, 'body': json.dumps({'status': 'ignored'})}
-                
             return {
                 'statusCode': 400,
-                'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps({
-                    'error': 'agent_id and session_id are required',
-                    'received_keys': list(body.keys())
-                })
+                'body': json.dumps({'error': 'agent_id and session_id required'})
             }
 
         return process_tool_call(agent_id, session_id, body)
 
     except Exception as e:
-        print(f"Error processing webhook: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Internal server error', 'details': str(e)})
-        }
+        print(f"Error: {str(e)}")
+        return {'statusCode': 500, 'body': json.dumps({'error': 'Internal error'})}
 
+def verify_elevenlabs_signature(headers, body_raw):
+    """
+    Verify ElevenLabs HMAC signature using the shared secret.
+    Expected headers: x-elevenlabs-signature-timestamp and x-elevenlabs-signature-signature
+    """
+    secret = os.environ.get('ELEVENLABS_WEBHOOK_SECRET')
+    if not secret:
+        print("[Auth] Missing ELEVENLABS_WEBHOOK_SECRET env var.")
+        return False
+        
+    timestamp = headers.get('x-elevenlabs-signature-timestamp')
+    signature = headers.get('x-elevenlabs-signature-signature')
+    
+    if not timestamp or not signature:
+        return False
+        
+    # Signature = hmac_sha256(secret, timestamp + body)
+    message = timestamp + body_raw
+    expected_sig = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    
+    return hmac.compare_digest(expected_sig, signature)
 
 def handle_initiation(query_params, body):
-    """
-    Called by ElevenLabs BEFORE the call starts to get setup data.
-    Returns the JSON contract to initialize the conversation.
-    """
-    agent_id = query_params.get('agent_id', 'unknown-agent')
-    session_id = query_params.get('session_id', 'unknown-session')
+    """Responds to conversation initiation with our local session variables."""
+    agent_id = query_params.get('agent_id') or body.get('agent_id', 'unknown')
+    session_id = query_params.get('session_id') or body.get('session_id', 'unknown')
     
-    # You can fetch the latest context from DynamoDB here if needed.
-    # For now, we return the dynamic variables we want available in the prompt.
-    print(f"[Webhook] INITIATION for agent={agent_id} session={session_id}")
+    print(f"[Webhook] INITIATION for {agent_id}/{session_id}")
     
-    response_payload = {
-        "type": "conversation_initiation_client_data",
-        "dynamic_variables": {
-            "agent_id": agent_id,
-            "session_id": session_id
-        }
-    }
-    
+    # ElevenLabs contract requires 'dynamic_variables' for injection
     return {
         'statusCode': 200,
         'headers': {'Content-Type': 'application/json'},
-        'body': json.dumps(response_payload)
+        'body': json.dumps({
+            "dynamic_variables": {
+                "agent_id": agent_id,
+                "session_id": session_id
+            }
+        })
     }
 
 

@@ -20,6 +20,10 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Bearer token for API authentication
+  ElevenLabsWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret for HMAC signature verification from ElevenLabs
 
 Globals:
   Function:
@@ -186,6 +190,8 @@ Resources:
       Environment:
         Variables:
           TRIGGER_CALL_FUNCTION_ARN: !GetAtt TriggerCallFunction.Arn
+          ELEVENLABS_WEBHOOK_SECRET: !Ref ElevenLabsWebhookSecret
+          API_BEARER_TOKEN: !Ref ApiBearerToken
       Events:
         WebhookApi:
           Type: Api
