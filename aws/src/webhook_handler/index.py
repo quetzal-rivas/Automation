@@ -13,115 +13,153 @@ lambda_client = boto3.client('lambda')
 
 def lambda_handler(event, context):
     try:
-        query_params = event.get('queryStringParameters', {}) or {}
         body = json.loads(event['body']) if event.get('body') else {}
-        callback_time = None
+        query_params = event.get('queryStringParameters', {}) or {}
+        
+        # Determine event type - ElevenLabs sends 'type' for lifecycle events
+        event_type = body.get('type')
+        
+        # 1. Handle CONVERSATION INITIATION (Fixes Error 424)
+        if event_type == "conversation_initiation_client_data":
+            return handle_initiation(query_params, body)
+            
+        # 2. Handle POST-CALL TRANSCRIPTION (Call Finished)
+        if event_type == "post_call_transcription":
+            return handle_post_call(body)
 
+        # 3. Handle DIRECT TOOL CALLS (save_directive, schedule_call)
         # Extraction: prioritize query params (original design), fall back to body (ElevenLabs tool design)
         agent_id = query_params.get('agent_id') or body.get('agent_id')
         session_id = query_params.get('session_id') or body.get('session_id')
 
         if not agent_id or not session_id:
+            # If it's another ElevenLabs event type we don't handle yet, just 200 OK
+            if event_type:
+                return {'statusCode': 200, 'body': json.dumps({'status': 'ignored'})}
+                
             return {
                 'statusCode': 400,
                 'headers': {'Content-Type': 'application/json'},
                 'body': json.dumps({
                     'error': 'agent_id and session_id are required',
-                    'received': {'query': query_params, 'body_keys': list(body.keys())}
+                    'received_keys': list(body.keys())
                 })
             }
 
-        call_status = body.get('status', 'unknown')
-        transcript = body.get('transcript', '') or ''
-        call_duration = body.get('duration_seconds', 0)
-        now = datetime.now(timezone.utc)
-
-        # Extraction for Tool Calls (direct input)
-        tool_directive = body.get('directive')
-        tool_scheduled_at = body.get('scheduled_at')
-
-        # --- Determine base call outcome ---
-        if tool_directive:
-            # This is a direct 'save_directive' tool call
-            final_status = 'PENDING'
-            directive = tool_directive
-        elif tool_scheduled_at:
-            # This is a direct 'schedule_call' tool call
-            final_status = 'CALLBACK_SCHEDULED'
-            directive = body.get('summary', 'Scheduled via voice tool.')
-            callback_time = tool_scheduled_at
-        elif call_status == 'completed' and transcript:
-            # This is the post-call cleanup webhook
-            final_status = 'COMPLETED'
-            directive = extract_directive(transcript)
-        elif call_status in ('no_answer', 'failed'):
-            final_status = 'USER_MISSED_CALL'
-            directive = None
-        elif call_status == 'busy':
-            final_status = 'USER_BUSY'
-            directive = None
-        else:
-            final_status = 'IN_PROGRESS'
-            directive = None
-
-        # --- Parse scheduling intent from transcript if not already set by tool ---
-        schedule_info = None
-        if not callback_time and final_status == 'COMPLETED' and transcript:
-            schedule_info = parse_scheduling_intent(transcript, now)
-            if schedule_info:
-                final_status = schedule_info['status']
-                callback_time = schedule_info.get('callback_time')
-
-        # --- Update DynamoDB ---
-        update_expr = (
-            'SET #status = :status, directive = :directive, updated_at = :ts, '
-            'call_duration = :dur, raw_webhook_data = :raw'
-        )
-        expr_values = {
-            ':status': final_status,
-            ':directive': directive,
-            ':ts': now.isoformat(),
-            ':dur': call_duration,
-            ':raw': json.dumps(body)
-        }
-        if callback_time:
-            update_expr += ', callback_scheduled_at = :cbt'
-            expr_values[':cbt'] = callback_time
-
-        table.update_item(
-            Key={'agent_id': agent_id, 'session_id': session_id},
-            UpdateExpression=update_expr,
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues=expr_values
-        )
-
-        # --- Schedule EventBridge follow-up if needed ---
-        if schedule_info and callback_time:
-            schedule_followup_call(agent_id, directive or 'Reporting back on the previous task.', callback_time)
-
-        # --- Handle CALLBACK_NOW immediately ---
-        if schedule_info and schedule_info['status'] == 'CALLBACK_NOW':
-            trigger_immediate_callback(agent_id, directive or 'Reporting back on the previous task.')
-
-        return {
-            'statusCode': 200,
-            'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({
-                'message': 'Webhook processed successfully',
-                'agent_id': agent_id,
-                'session_id': session_id,
-                'status': final_status,
-                'callback_scheduled_at': callback_time
-            })
-        }
+        return process_tool_call(agent_id, session_id, body)
 
     except Exception as e:
         print(f"Error processing webhook: {str(e)}")
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Internal server error'})
+            'body': json.dumps({'error': 'Internal server error', 'details': str(e)})
         }
+
+
+def handle_initiation(query_params, body):
+    """
+    Called by ElevenLabs BEFORE the call starts to get setup data.
+    Returns the JSON contract to initialize the conversation.
+    """
+    agent_id = query_params.get('agent_id', 'unknown-agent')
+    session_id = query_params.get('session_id', 'unknown-session')
+    
+    # You can fetch the latest context from DynamoDB here if needed.
+    # For now, we return the dynamic variables we want available in the prompt.
+    print(f"[Webhook] INITIATION for agent={agent_id} session={session_id}")
+    
+    response_payload = {
+        "type": "conversation_initiation_client_data",
+        "dynamic_variables": {
+            "agent_id": agent_id,
+            "session_id": session_id
+        }
+    }
+    
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps(response_payload)
+    }
+
+
+def handle_post_call(body):
+    """
+    Called by ElevenLabs AFTER the call ends with full transcripts and analysis.
+    """
+    data = body.get('data', {})
+    conv_id = data.get('conversation_id')
+    transcript_obj = data.get('transcript', [])
+    analysis = data.get('analysis', {})
+    
+    # Reconstruct transcript as text
+    full_text = "\n".join([f"{t['role'].upper()}: {t['message']}" for t in transcript_obj])
+    summary = analysis.get('summary', 'No summary available.')
+    
+    # ElevenLabs lifecycle events don't send our custom agent_id/session_id in the root,
+    # BUT they are available in the 'dynamic_variables' if we sent them, or here:
+    custom_vars = data.get('config_overrides', {}).get('agent', {}).get('prompt', {}).get('dynamic_variables', {})
+    agent_id = custom_vars.get('agent_id')
+    session_id = custom_vars.get('session_id')
+
+    print(f"[Webhook] POST-CALL for session={session_id} conv={conv_id}")
+
+    if agent_id and session_id:
+        table.update_item(
+            Key={'agent_id': agent_id, 'session_id': session_id},
+            UpdateExpression='SET #status = :status, transcript = :text, ai_summary = :summary, updated_at = :ts',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={
+                ':status': 'COMPLETED',
+                ':text': full_text,
+                ':summary': summary,
+                ':ts': datetime.now(timezone.utc).isoformat()
+            }
+        )
+
+    return {'statusCode': 200, 'body': json.dumps({'status': 'recorded'})}
+
+
+def process_tool_call(agent_id, session_id, body):
+    """Original tool processing logic for directive/scheduling."""
+    callback_time = None
+    tool_directive = body.get('directive')
+    tool_scheduled_at = body.get('scheduled_at')
+    now = datetime.now(timezone.utc)
+
+    if tool_directive:
+        final_status = 'PENDING'
+        directive = tool_directive
+    elif tool_scheduled_at:
+        final_status = 'CALLBACK_SCHEDULED'
+        directive = body.get('summary', 'Scheduled via voice tool.')
+        callback_time = tool_scheduled_at
+    else:
+        # Generic status update
+        final_status = 'IN_PROGRESS'
+        directive = None
+
+    table.update_item(
+                Key={'agent_id': agent_id, 'session_id': session_id},
+                UpdateExpression='SET #status = :status, directive = :directive, updated_at = :ts, raw_webhook_data = :raw',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': final_status,
+                    ':directive': directive,
+                    ':ts': now.isoformat(),
+                    ':raw': json.dumps(body)
+                }
+            )
+
+    if final_status == 'CALLBACK_SCHEDULED' and callback_time:
+        schedule_followup_call(agent_id, directive, callback_time)
+
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({'message': 'Tool processed', 'status': final_status})
+    }
 
 
 def extract_directive(transcript):
