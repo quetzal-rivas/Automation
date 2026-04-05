@@ -138,6 +138,15 @@ After confirming the directive:
         }
     }
 
+    # Add webhook URL if available
+    domain_name = os.environ.get('API_DOMAIN')
+    webhook_url = f"https://{domain_name}/prod/webhook" if domain_name else None
+    
+    if webhook_url:
+        payload['conversation_config_override']['webhook'] = {
+            'url': f"{webhook_url}?agent_id={agent_id}&session_id={session_id}"
+        }
+
     print(f"[ElevenLabs] Triggering call to {phone_number} via agent {agent_voice_id}")
     print(f"[ElevenLabs] Phone number ID: {phone_number_id or 'NOT SET'}")
 
