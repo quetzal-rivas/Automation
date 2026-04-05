@@ -141,7 +141,7 @@ def handle_post_call(body):
             UpdateExpression='SET #status = :status, transcript = :text, ai_summary = :summary, updated_at = :ts',
             ExpressionAttributeNames={'#status': 'status'},
             ExpressionAttributeValues={
-                ':status': 'COMPLETED',
+                ':status': 'DIRECTIVE_AVAILABLE',
                 ':text': full_text,
                 ':summary': summary,
                 ':ts': datetime.now(timezone.utc).isoformat()
