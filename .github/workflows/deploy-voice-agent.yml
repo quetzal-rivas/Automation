@@ -47,4 +47,5 @@ jobs:
               ElevenLabsAgentId=${{ secrets.ELEVENLABS_AGENT_ID }} \
               ElevenLabsPhoneNumberId=${{ secrets.ELEVENLABS_PHONE_NUMBER_ID }} \
               UserPhoneNumber=${{ secrets.USER_PHONE_NUMBER }} \
-              ApiBearerToken=${{ secrets.API_BEARER_TOKEN }}
+              ApiBearerToken=${{ secrets.API_BEARER_TOKEN }} \
+              ElevenLabsWebhookSecret=${{ secrets.ELEVENLABS_WEBHOOK_SECRET }}
