@@ -135,13 +135,26 @@ def handle_post_call(body):
     full_text = "\n".join([f"{t['role'].upper()}: {t['message']}" for t in transcript_obj])
     summary = analysis.get('summary', 'No summary available.')
     
-    # ElevenLabs lifecycle events don't send our custom agent_id/session_id in the root,
-    # BUT they are available in the 'dynamic_variables' if we sent them, or here:
+    # Resolve agent_id and session_id
+    # 1. Try from webhook query params/context (if forwarded)
     custom_vars = data.get('config_overrides', {}).get('agent', {}).get('prompt', {}).get('dynamic_variables', {})
     agent_id = custom_vars.get('agent_id')
     session_id = custom_vars.get('session_id')
 
-    print(f"[Webhook] POST-CALL for session={session_id} conv={conv_id}")
+    # 2. Fallback: Search DynamoDB by conversation_id (GSI)
+    if not (agent_id and session_id) and conv_id:
+        print(f"[Webhook] Searching session for ElevenLabs conv_id: {conv_id}")
+        response = table.query(
+            IndexName='ElevenLabsCallIndex',
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('elevenlabs_call_id').eq(conv_id)
+        )
+        items = response.get('Items', [])
+        if items:
+            agent_id = items[0]['agent_id']
+            session_id = items[0]['session_id']
+            print(f"[Webhook] Resolved session: {agent_id}/{session_id}")
+
+    print(f"[Webhook] POST-CALL result for {agent_id}/{session_id} (conv={conv_id})")
 
     if agent_id and session_id:
         table.update_item(

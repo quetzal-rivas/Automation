@@ -74,6 +74,14 @@ def lambda_handler(event, context):
         elevenlabs_response = trigger_elevenlabs_call(agent_id, session_id, summary, webhook_url)
         call_id = elevenlabs_response.get('call_id') or elevenlabs_response.get('conversation_id')
 
+        # Link the ElevenLabs call ID to our session
+        if call_id:
+            table.update_item(
+                Key={'agent_id': agent_id, 'session_id': session_id},
+                UpdateExpression='SET elevenlabs_call_id = :cid',
+                ExpressionAttributeValues={':cid': call_id}
+            )
+
         response_body = {
             'session_id': session_id,
             'status': 'CALL_IN_PROGRESS',

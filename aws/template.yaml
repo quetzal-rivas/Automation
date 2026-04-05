@@ -46,6 +46,8 @@ Resources:
           AttributeType: S
         - AttributeName: timestamp
           AttributeType: S
+        - AttributeName: elevenlabs_call_id
+          AttributeType: S
       KeySchema:
         - AttributeName: agent_id
           KeyType: HASH
@@ -58,6 +60,12 @@ Resources:
               KeyType: HASH
             - AttributeName: timestamp
               KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ElevenLabsCallIndex
+          KeySchema:
+            - AttributeName: elevenlabs_call_id
+              KeyType: HASH
           Projection:
             ProjectionType: ALL
       StreamSpecification:
