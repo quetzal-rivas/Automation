@@ -138,15 +138,9 @@ After confirming the directive:
         }
     }
 
-    # Add webhook URL if available
-    if webhook_url:
-        payload['conversation_config_override']['webhook'] = {
-            'url': f"{webhook_url}?agent_id={agent_id}&session_id={session_id}"
-        }
-
     print(f"[ElevenLabs] Triggering call to {phone_number} via agent {agent_voice_id}")
     print(f"[ElevenLabs] Phone number ID: {phone_number_id or 'NOT SET'}")
-    print(f"[ElevenLabs] Webhook URL: {payload['conversation_config_override'].get('webhook', {}).get('url', 'NOT SET')}")
+
 
     response = requests.post(
         'https://api.elevenlabs.io/v1/convai/twilio/outbound-call',
