@@ -14,16 +14,21 @@ lambda_client = boto3.client('lambda')
 def lambda_handler(event, context):
     try:
         query_params = event.get('queryStringParameters', {}) or {}
-        agent_id = query_params.get('agent_id')
-        session_id = query_params.get('session_id')
-
         body = json.loads(event['body']) if event.get('body') else {}
+        callback_time = None
+
+        # Extraction: prioritize query params (original design), fall back to body (ElevenLabs tool design)
+        agent_id = query_params.get('agent_id') or body.get('agent_id')
+        session_id = query_params.get('session_id') or body.get('session_id')
 
         if not agent_id or not session_id:
             return {
                 'statusCode': 400,
                 'headers': {'Content-Type': 'application/json'},
-                'body': json.dumps({'error': 'agent_id and session_id are required'})
+                'body': json.dumps({
+                    'error': 'agent_id and session_id are required',
+                    'received': {'query': query_params, 'body_keys': list(body.keys())}
+                })
             }
 
         call_status = body.get('status', 'unknown')
@@ -31,8 +36,22 @@ def lambda_handler(event, context):
         call_duration = body.get('duration_seconds', 0)
         now = datetime.now(timezone.utc)
 
+        # Extraction for Tool Calls (direct input)
+        tool_directive = body.get('directive')
+        tool_scheduled_at = body.get('scheduled_at')
+
         # --- Determine base call outcome ---
-        if call_status == 'completed' and transcript:
+        if tool_directive:
+            # This is a direct 'save_directive' tool call
+            final_status = 'PENDING'
+            directive = tool_directive
+        elif tool_scheduled_at:
+            # This is a direct 'schedule_call' tool call
+            final_status = 'CALLBACK_SCHEDULED'
+            directive = body.get('summary', 'Scheduled via voice tool.')
+            callback_time = tool_scheduled_at
+        elif call_status == 'completed' and transcript:
+            # This is the post-call cleanup webhook
             final_status = 'COMPLETED'
             directive = extract_directive(transcript)
         elif call_status in ('no_answer', 'failed'):
@@ -42,14 +61,12 @@ def lambda_handler(event, context):
             final_status = 'USER_BUSY'
             directive = None
         else:
-            final_status = 'CALL_FAILED'
+            final_status = 'IN_PROGRESS'
             directive = None
 
-        # --- Parse scheduling intent from transcript ---
+        # --- Parse scheduling intent from transcript if not already set by tool ---
         schedule_info = None
-        callback_time = None
-
-        if final_status == 'COMPLETED' and transcript:
+        if not callback_time and final_status == 'COMPLETED' and transcript:
             schedule_info = parse_scheduling_intent(transcript, now)
             if schedule_info:
                 final_status = schedule_info['status']

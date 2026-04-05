@@ -11,8 +11,10 @@ table = dynamodb.Table(table_name)
 def lambda_handler(event, context):
     try:
         query_params = event.get('queryStringParameters', {}) or {}
-        agent_id = query_params.get('agent_id')
-        session_id = query_params.get('session_id')
+        body = json.loads(event['body']) if event.get('body') else {}
+        
+        agent_id = query_params.get('agent_id') or body.get('agent_id')
+        session_id = query_params.get('session_id') or body.get('session_id')
 
         if not agent_id:
             return {
