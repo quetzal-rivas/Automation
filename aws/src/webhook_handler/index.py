@@ -22,20 +22,24 @@ def lambda_handler(event, context):
         query_params = event.get('queryStringParameters', {}) or {}
         
         # --- Dual Security Check ---
-        # 1. Check Bearer Token (for Initiation and manual calls)
         auth_header = headers.get('authorization', '')
         expected_token = f"Bearer {os.environ.get('API_BEARER_TOKEN')}"
+        
+        # Log for debugging (remove later)
+        print(f"[Webhook] AUTH EVAL: header={auth_header[:15]}... expected={expected_token[:15]}...")
+        print(f"[Webhook] EVENT: type={body.get('type')} keys={list(body.keys())}")
         
         # 2. Check ElevenLabs HMAC Signature (for Post-call)
         signature = headers.get('x-elevenlabs-signature-signature') or headers.get('elevenlabs-signature')
         is_hmac_valid = False
         if signature:
             is_hmac_valid = verify_elevenlabs_signature(headers, body_raw)
+            print(f"[Webhook] HMAC VALID: {is_hmac_valid}")
             
         authenticated = (auth_header == expected_token) or is_hmac_valid
         
         if not authenticated:
-            print("[Webhook] Unauthorized attempt blocked.")
+            print(f"[Webhook] Unauthorized attempt blocked. AuthHeader: {auth_header[:10]}...")
             return {'statusCode': 401, 'body': json.dumps({'error': 'Unauthorized'})}
 
         # --- Event Dispatching ---
