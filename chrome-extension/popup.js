@@ -13,20 +13,17 @@ function updateUI(status) {
         btn.className = 'state-connecting';
         text.innerText = 'Llamando...';
         loader.style.display = 'block';
-        subText.innerText = 'Buscando enlace seguro con Gemini 3.1';
-        subText.className = 'pulse-pink';
+        subText.innerText = 'Abriendo Motor de Voz...';
     } else if (status === 'CONNECTED') {
         btn.className = 'state-connected';
         text.innerText = 'Colgar Llamada';
         loader.style.display = 'none';
         subText.innerText = 'En el aire con Gemini 3.1';
-        subText.className = '';
     } else {
         btn.className = 'state-disconnected';
         text.innerText = 'Iniciar Llamada';
         loader.style.display = 'none';
-        subText.innerText = 'Conexión con Gemini Multimodal Live establecida.';
-        subText.className = '';
+        subText.innerText = 'Pulse para conectar con Antigravity';
     }
 }
 
@@ -38,28 +35,17 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 btn.addEventListener('click', async () => {
-    console.log('[Popup] Usuario hizo clic en Iniciar/Colgar');
-    
     chrome.runtime.sendMessage({ type: 'GET_STATUS' }, async (response) => {
         if (response && response.status === 'CONNECTED') {
             chrome.runtime.sendMessage({ type: 'HANG_UP' });
         } else {
-            try {
-                console.log('[Popup] Intentando pedir permiso de micro local...');
-                // Algunos navegadores permiten pedirlo en el popup si es gesto de usuario
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(t => t.stop());
-                
-                console.log('[Popup] Permiso de micro concedido. Iniciando sesión...');
-                chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
-                updateUI('CONNECTING');
-            } catch (e) {
-                console.warn('[Popup] Chrome bloqueó el micro en el popup. Abriendo Motor de Voz en pestaña...');
-                // SI FALLA EN EL POPUP, ABRIMOS LA PESTAÑA DEL MOTOR DE VOZ
-                chrome.tabs.create({ url: chrome.runtime.getURL('mic.html'), pinned: true });
-                updateUI('CONNECTING');
-                chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
-            }
+            console.log('[Popup] Abriendo Motor de Voz en pestaña fija...');
+            // ABRIR TAB DEL MOTOR DE VOZ INMEDIATAMENTE
+            chrome.tabs.create({ url: chrome.runtime.getURL('mic.html'), pinned: true });
+            
+            // AVISAR AL BACKGROUND
+            chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
+            updateUI('CONNECTING');
         }
     });
 });
