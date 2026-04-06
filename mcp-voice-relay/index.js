@@ -45,11 +45,18 @@ wss.on('connection', (ws) => {
       }
     } catch (e) {
       if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
-        geminiWs.send(JSON.stringify({
+        const base64Data = data.toString('base64');
+        const audioPayload = {
           realtime_input: {
-            media_chunks: [{ mime_type: 'audio/pcm;rate=16000', data: data.toString('base64') }]
+            media_chunks: [
+              {
+                data: base64Data,
+                mime_type: "audio/pcm;rate=16000"
+              }
+            ]
           }
-        }));
+        };
+        geminiWs.send(JSON.stringify(audioPayload));
       }
     }
   });
