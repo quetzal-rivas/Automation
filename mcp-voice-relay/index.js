@@ -38,6 +38,7 @@ wss.on('connection', (ws) => {
         return;
       }
       if (msg.type === 'VOICE_START' || msg.type === 'VOICE_ANSWER') {
+        console.error(`[Relay] 🚀 Comando de inicio detectado (${msg.type}). Despegando Gemini...`);
         startGeminiSession();
       } else if (msg.type === 'VOICE_DECLINE' || msg.type === 'CALL_DECLINED') {
         stopGeminiSession();
