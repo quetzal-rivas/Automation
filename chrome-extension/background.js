@@ -1,30 +1,26 @@
 let socket = null;
-let isWaitingForFirstAudio = false;
+let callStatus = 'DISCONNECTED'; // 'DISCONNECTED', 'CONNECTING', 'CONNECTED'
 
-// Conexión constante al Relay Local para recibir llamadas y resultados
 function connectToRelay() {
   socket = new WebSocket('ws://127.0.0.1:8081');
-
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
     
     if (data.type === 'INCOMING_CALL' || data.type === 'TASK_COMPLETED') {
       showCallOverlay(data);
     } else if (data.type === 'AUDIO_CHUNK') {
-      // Si Gemini empieza a hablar, mostramos la burbuja
-      if (isWaitingForFirstAudio) {
-          isWaitingForFirstAudio = false;
+      if (callStatus === 'CONNECTING') {
+          callStatus = 'CONNECTED';
+          chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'CONNECTED' });
+          chrome.runtime.sendMessage({ type: 'STOP_RING' });
           showCallOverlay();
       }
       chrome.runtime.sendMessage(data);
     }
   };
-
-  socket.onerror = () => setTimeout(connectToRelay, 5000);
   socket.onclose = () => setTimeout(connectToRelay, 5000);
 }
 
-// Mostrar UI Flotante
 async function showCallOverlay(data) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && !tab.url.startsWith('chrome://')) {
@@ -39,22 +35,24 @@ async function showCallOverlay(data) {
   }
 }
 
-// Manejar mensajes internos
-chrome.runtime.onMessage.addListener(async (message) => {
-  if (message.type === 'VOICE_START_REQUEST') {
-    isWaitingForFirstAudio = true;
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  if (message.type === 'GET_STATUS') {
+    sendResponse({ status: callStatus });
+  } else if (message.type === 'VOICE_START_REQUEST') {
+    callStatus = 'CONNECTING';
     await startOffscreenAudio();
-    // Avisar al offscreen que inicie el micro y la conexión al relay
     chrome.runtime.sendMessage({ type: 'START_MIC' });
+    chrome.runtime.sendMessage({ type: 'PLAY_RING' }); // Iniciar trino
 
-  } else if (message.type === 'VOICE_ANSWER') {
-    chrome.runtime.sendMessage({ type: 'START_MIC' });
-  } else if (message.type === 'VOICE_DECLINE') {
+  } else if (message.type === 'VOICE_DECLINE' || message.type === 'HANG_UP') {
+    callStatus = 'DISCONNECTED';
     if (socket) socket.send(JSON.stringify({ type: 'CALL_DECLINED' }));
     chrome.runtime.sendMessage({ type: 'STOP_AUDIO' });
+    chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'DISCONNECTED' });
   } else if (message.type === 'USER_ACTIVITY') {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'HEARTBEAT' }));
   }
+  return true;
 });
 
 async function startOffscreenAudio() {
