@@ -11,35 +11,33 @@ async function startMic() {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
     micContext = new AudioContext({ sampleRate: 16000 });
     
-    // Analizador para las ondas visuales
+    // CARGAR EL WORKLET MODERNO (Abril 2026 Ready)
+    await micContext.audioWorklet.addModule('pcm-processor.js');
+    console.log('[Motor Mic] AudioWorklet Cargado ✅');
+
     analyser = micContext.createAnalyser();
     analyser.fftSize = 256;
     bufferLength = analyser.frequencyBinCount;
     dataArray = new Uint8Array(bufferLength);
 
     const source = micContext.createMediaStreamSource(micStream);
-    const processor = micContext.createScriptProcessor(4096, 1, 1);
-    
-    source.connect(analyser);
-    source.connect(processor);
-    processor.connect(micContext.destination);
+    const processorNode = new AudioWorkletNode(micContext, 'pcm-processor');
 
-    processor.onaudioprocess = (e) => {
-      const input = e.inputBuffer.getChannelData(0);
-      const pcm = new Int16Array(input.length);
-      for (let i = 0; i < input.length; i++) {
-        const s = Math.max(-1, Math.min(1, input[i]));
-        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-      }
-      // ENVIAR PCM AL BACKGROUND SCRIPT
+    // Recibir PCM desde el hilo del Worklet
+    processorNode.port.onmessage = (event) => {
+      const pcmBuffer = event.data;
       chrome.runtime.sendMessage({ 
           type: 'PCM_CHUNK', 
-          data: btoa(String.fromCharCode(...new Uint8Array(pcm.buffer))) 
+          data: btoa(String.fromCharCode(...new Uint8Array(pcmBuffer))) 
       });
     };
 
+    source.connect(analyser); // Para el visualizador
+    source.connect(processorNode); // Para enviar a Gemini
+    processorNode.connect(micContext.destination);
+
     draw();
-    console.log('[Motor Mic] Captura iniciada');
+    console.log('[Motor Mic] Captura Worklet Iniciada ⚡');
   } catch (err) {
     console.error('[Motor Mic] Error:', err);
     document.getElementById('state-text').innerText = 'ERROR EN MICRO: ' + err;
