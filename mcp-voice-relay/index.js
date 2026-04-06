@@ -94,6 +94,20 @@ function startGeminiSession() {
 
   geminiWs.on('message', async (data) => {
     const response = JSON.parse(data.toString());
+
+    if (response.setup_complete) {
+        console.error('[Gemini] Setup completo. Pidiendo saludo inicial...');
+        geminiWs.send(JSON.stringify({
+          client_content: {
+            turns: [{
+              role: "user",
+              parts: [{ text: "Hola. Salúdame de forma futurista y pregúntame qué vamos a construir hoy. Sé breve." }]
+            }],
+            turn_complete: true
+          }
+        }));
+    }
+
     if (response.server_content?.model_turn?.parts) {
       for (const part of response.server_content.model_turn.parts) {
         if (part.inline_data && activeBrowserConnection) {
