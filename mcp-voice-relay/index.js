@@ -20,6 +20,7 @@ const SYSTEM_PROMPT = "Eres un asistente de codificación por voz. Tienes acceso
 
 let activeBrowserConnection = null;
 let geminiWs = null;
+let isGeminiReady = false; // El semáforo de sincronización
 let lastBrowserActivity = Date.now();
 
 // --- Servidor de WebSockets para Chrome Extension ---
@@ -44,7 +45,8 @@ wss.on('connection', (ws) => {
         stopGeminiSession();
       }
     } catch (e) {
-      if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+      // SOLO ENVIAR AUDIO SI GEMINI YA DIJO "SETUP COMPLETE"
+      if (geminiWs && geminiWs.readyState === WebSocket.OPEN && isGeminiReady) {
         const base64Data = data.toString('base64');
         const audioPayload = {
           realtime_input: {
@@ -71,6 +73,7 @@ wss.on('connection', (ws) => {
 // --- Lógica Gemini Multimodal Live ---
 function startGeminiSession() {
   if (geminiWs) return;
+  isGeminiReady = false; // Reset al empezar
   if (!GEMINI_API_KEY) {
       console.error('[Gemini] 🔴 ERROR: GEMINI_API_KEY no detectada. Revisa tu .env o mcp_config.json');
       return;
@@ -112,6 +115,7 @@ function startGeminiSession() {
     
     if (response.setup_complete) {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
+        isGeminiReady = true; // ¡ABRIMOS EL SEMÁFORO!
         geminiWs.send(JSON.stringify({
           client_content: {
             turns: [{ role: "user", parts: [{ text: "Hola. Preséntate de forma corta." }] }],
@@ -143,6 +147,7 @@ function startGeminiSession() {
   geminiWs.on('close', (code, reason) => { 
     console.error(`[Gemini] 🔴 Sesión cerrada por Google. Código: ${code}, Razón: ${reason}`);
     geminiWs = null; 
+    isGeminiReady = false;
   });
 }
 
