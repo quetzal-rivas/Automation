@@ -69,8 +69,8 @@ function startGeminiSession() {
       return;
   }
 
-  const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
-  console.error(`[Gemini] 📡 Iniciando conexión... (URL: ...key=${GEMINI_API_KEY.slice(0, 5)}***)`);
+  const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+  console.error(`[Gemini] 📡 Iniciando conexión v1BETA... (URL: ...key=${GEMINI_API_KEY.slice(0, 5)}***)`);
   geminiWs = new WebSocket(url);
 
   geminiWs.on('open', () => {
@@ -78,7 +78,7 @@ function startGeminiSession() {
     
     const setupMsg = {
       setup: {
-        model: "models/gemini-2.0-flash", // Modelo estable para Live
+        model: "models/gemini-3.1-flash-live-preview", // ¡El último grito de Marzo 2026!
         generation_config: { response_modalities: ["audio"] },
         tools: [{
           function_declarations: [{
@@ -94,7 +94,7 @@ function startGeminiSession() {
         system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
       }
     };
-    console.error('[Gemini] 📤 Enviando SETUP COMPLETO:', JSON.stringify(setupMsg, null, 2));
+    console.error('[Gemini] 📤 Enviando SETUP (SUPER LIVE 3.1):', JSON.stringify(setupMsg, null, 2));
     geminiWs.send(JSON.stringify(setupMsg));
   });
 
@@ -107,7 +107,7 @@ function startGeminiSession() {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
         geminiWs.send(JSON.stringify({
           client_content: {
-            turns: [{ role: "user", parts: [{ text: "Hola. Salúdame de forma corta." }] }],
+            turns: [{ role: "user", parts: [{ text: "Hola. Preséntate de forma corta." }] }],
             turn_complete: true
           }
         }));
