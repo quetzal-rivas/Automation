@@ -2,6 +2,7 @@ let audioContext;
 let processor;
 let stream;
 let relaySocket;
+let nextStartTime = 0;
 
 // Conectar al micro y al Relay
 async function startAudio() {
@@ -23,25 +24,21 @@ async function startAudio() {
     relaySocket = new WebSocket('ws://127.0.0.1:8081');
     
     relaySocket.onopen = () => {
-      console.log('[Offscreen] Stream de audio iniciado hacia el Relay');
-      
-      // Enviamos el aviso de "Llamada Contestada"
+      console.log('[Offscreen] Stream de audio iniciado');
       relaySocket.send(JSON.stringify({ type: 'VOICE_START' }));
     };
 
-    // Procesador para convertir 32-bit Float -> 16-bit Int PCM
+    // Procesador: 32-bit Float -> 16-bit Int PCM
     processor = audioContext.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {
-      const inputData = e.inputBuffer.getChannelData(0);
-      const pcmData = new Int16Array(inputData.length);
-      
-      for (let i = 0; i < inputData.length; i++) {
-        const s = Math.max(-1, Math.min(1, inputData[i]));
-        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      const input = e.inputBuffer.getChannelData(0);
+      const pcm = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
       }
-      
-      if (relaySocket.readyState === WebSocket.OPEN) {
-        relaySocket.send(pcmData.buffer);
+      if (relaySocket && relaySocket.readyState === WebSocket.OPEN) {
+        relaySocket.send(pcm.buffer);
       }
     };
 
@@ -49,23 +46,45 @@ async function startAudio() {
     processor.connect(audioContext.destination);
     
   } catch (err) {
-    console.error('[Offscreen] Error al capturar audio:', err);
+    console.error('[Offscreen] Error:', err);
   }
 }
 
-// Escuchar si el Relay nos pide colgar
-window.onmessage = (e) => {
-  if (e.data === 'STOP_AUDIO') {
+// Escuchar mensajes del background (Audio o Stop)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'AUDIO_CHUNK') {
+    playPcmChunk(msg.data);
+  } else if (msg.type === 'STOP_AUDIO') {
     stopAudio();
   }
-};
+});
 
-function stopAudio() {
-  if (stream) stream.getTracks().forEach(track => track.stop());
-  if (audioContext) audioContext.close();
-  if (relaySocket) relaySocket.close();
-  window.close(); // Cerramos el documento offscreen
+function playPcmChunk(base64Data) {
+  if (!audioContext) return;
+  
+  const binary = atob(base64Data);
+  const pcm16 = new Int16Array(new Uint8Array([...binary].map(c => c.charCodeAt(0))).buffer);
+  const float32 = new Float32Array(pcm16.length);
+  for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 0x8000;
+  
+  const buffer = audioContext.createBuffer(1, float32.length, 16000);
+  buffer.getChannelData(0).set(float32);
+  
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioContext.destination);
+  
+  // Reproducción balanceada (evita clics entre chunks)
+  const currentTime = audioContext.currentTime;
+  if (nextStartTime < currentTime) nextStartTime = currentTime;
+  source.start(nextStartTime);
+  nextStartTime += buffer.duration;
 }
 
-// Auto-iniciar al cargar
+function stopAudio() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (audioContext) audioContext.close();
+  if (relaySocket) relaySocket.close();
+}
+
 startAudio();

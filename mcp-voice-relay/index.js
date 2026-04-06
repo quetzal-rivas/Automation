@@ -4,108 +4,244 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
+import fs from 'fs/promises';
 import path from 'path';
 
 dotenv.config();
 
-// --- Configuración Gemini Live ---
-// Usaremos la API Multimodal de Gemini para latencia mínima
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+const API_BASE_URL = process.env.API_BASE_URL;
+const AGENT_ID = process.env.AGENT_ID;
+const BEARER_TOKEN = process.env.BEARER_TOKEN;
 
-// --- Almacén de Conexiones ---
+const SYSTEM_PROMPT = "Eres un asistente de codificación por voz. Tienes acceso al sistema de archivos local para ayudar al usuario con su código en tiempo real. Responde de forma concisa y profesional.";
+
 let activeBrowserConnection = null;
-let geminiSession = null;
+let geminiWs = null;
+let lastBrowserActivity = Date.now(); // Track last browser interaction
 
-// --- Servidor de WebSockets para Chrome Extension (Port 8081) ---
-const wss = new WebSocketServer({ port: 8081, host: "0.0.0.0" });
+// --- Servidor de WebSockets para Chrome Extension ---
+const wss = new WebSocketServer({ port: parseInt(process.env.WEBSOCKET_PORT || '8081'), host: "0.0.0.0" });
 
 wss.on('connection', (ws) => {
-  console.error('[Relay] Chrome Extension conectada');
+  console.error('[Relay] Browser Extension conectada');
   activeBrowserConnection = ws;
+  lastBrowserActivity = Date.now();
 
   ws.on('message', async (data) => {
-    // Si data es un string, es un comando (START/DECLINE)
-    if (typeof data === 'string' || data instanceof Buffer && data.length < 100) {
-      try {
-        const cmd = JSON.parse(data.toString());
-        if (cmd.type === 'VOICE_START') {
-          console.error('[Relay] Iniciando sesión con Gemini Live...');
-          // TODO: Iniciar handshake con Gemini aquí si es conversación real-time
-        }
-      } catch (e) { /* Buffer de audio raw */ }
-    } else {
-      // Es un Buffer de Audio PCM 16-bit
-      // Aquí lo reenviaríamos a Gemini Live en tiempo real
-      // console.error(`[Relay] Recibidos ${data.length} bytes de audio`);
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'HEARTBEAT') {
+        lastBrowserActivity = Date.now(); // Reset on every heartbeat or activity report
+        return;
+      }
+      
+      if (msg.type === 'VOICE_START' || msg.type === 'VOICE_ANSWER') {
+        startGeminiSession();
+      } else if (msg.type === 'VOICE_DECLINE') {
+        stopGeminiSession();
+      }
+    } catch (e) {
+      // Audio PCM logic...
+      if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+        geminiWs.send(JSON.stringify({
+          realtime_input: {
+            media_chunks: [{ mime_type: 'audio/pcm;rate=16000', data: data.toString('base64') }]
+          }
+        }));
+      }
     }
   });
 
   ws.on('close', () => {
-    console.error('[Relay] Chrome Extension desconectada');
+    console.error('[Relay] Browser Extension desconectada');
     activeBrowserConnection = null;
+    stopGeminiSession();
   });
 });
 
-// --- Servidor MCP ---
-const server = new Server(
-  {
-    name: "gemini-voice-relay",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+// --- Lógica Gemini Multimodal Live ---
+function startGeminiSession() {
+  if (geminiWs) return;
 
-// Herramientas disponibles para el Agente (YO)
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "trigger_browser_call",
-        description: "Hace sonar el navegador del usuario para una llamada de voz entrante.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            summary: { type: "string", description: "Resumen de por qué se llama al usuario." }
-          },
-          required: ["summary"]
+  const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+  geminiWs = new WebSocket(url);
+
+  geminiWs.on('open', () => {
+    console.error('[Gemini] Conexión abierta. Enviando configuracion...');
+    const setupMsg = {
+      setup: {
+        model: "models/gemini-2.0-flash-exp",
+        generation_config: { response_modalities: ["audio"] },
+        tools: [{
+          function_declarations: [{
+            name: "send_directive",
+            description: "Envia una instrucción al agente Antigravity.",
+            parameters: { 
+              type: "object", 
+              properties: { instruction: { type: "string" } },
+              required: ["instruction"]
+            }
+          }]
+        }],
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT + " Cuando el usuario quiera realizar cambios, usa 'send_directive'." }] }
+      }
+    };
+    geminiWs.send(JSON.stringify(setupMsg));
+  });
+
+  geminiWs.on('message', async (data) => {
+    const response = JSON.parse(data.toString());
+    if (response.server_content?.model_turn?.parts) {
+      for (const part of response.server_content.model_turn.parts) {
+        if (part.inline_data && activeBrowserConnection) {
+          activeBrowserConnection.send(JSON.stringify({ type: 'AUDIO_CHUNK', data: part.inline_data.data }));
         }
       }
-    ]
-  };
-});
+    }
+    if (response.tool_call) {
+      for (const call of response.tool_call.function_calls) {
+        const result = await handleToolCall(call);
+        geminiWs.send(JSON.stringify({
+          tool_response: {
+            function_responses: [{ name: call.name, id: call.id, response: { result } }]
+          }
+        }));
+      }
+    }
+  });
 
-// Lógica de ejecución de herramientas
+  geminiWs.on('error', (err) => console.error('[Gemini] Error:', err));
+  geminiWs.on('close', () => { geminiWs = null; });
+}
+
+function stopGeminiSession() {
+    if (geminiWs) {
+        geminiWs.close();
+        geminiWs = null;
+    }
+}
+
+// --- Middleware API Client (Simplified Client for trigger_call / get_directive) ---
+async function apiRequest(method, path, body = null) {
+  const url = `${API_BASE_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      'authorization': BEARER_TOKEN.startsWith('Bearer') ? BEARER_TOKEN : `Bearer ${BEARER_TOKEN}`,
+      'x-agent-id': AGENT_ID
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!response.ok) throw new Error(`API Error: ${response.status}`);
+  return response.json();
+}
+
+// --- Tools Implementation ---
+async function handleToolCall(call) {
+  console.error(`[Tool] Ejecutando: ${call.name}`, call.args);
+  const root = '/Users/aztecgod/Active-Projects/Automation';
+  
+  if (call.name === 'send_directive') {
+    const directivePath = path.join(root, 'VOICE_DIRECTIVE.md');
+    const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${new Date().toISOString()}\n`;
+    await fs.writeFile(directivePath, content);
+    return "Directiva enviada a Antigravity.";
+  }
+  return "Herramienta no implementada";
+}
+
+// --- Servidor MCP ---
+const server = new Server({ name: "gemini-voice-relay", version: "1.0.0" }, { capabilities: { tools: {} } });
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: "trigger_browser_call",
+      description: "Inicia la interfaz de voz en el navegador (Gemini Live). Si el usuario no está activo, puede caer a llamada telefónica.",
+      inputSchema: { type: "object", properties: { summary: { type: "string" } } }
+    },
+    {
+      name: "trigger_call",
+      description: "Trigger an outbound phone call (ElevenLabs) for this agent.",
+      inputSchema: { 
+        type: "object", 
+        properties: { 
+            summary: { type: "string" },
+            context: { type: "object" }
+        },
+        required: ["summary"]
+      }
+    },
+    {
+      name: "get_directive",
+      description: "Fetch the latest directive/state assigned to this AGENT_ID.",
+      inputSchema: { type: "object", properties: { include_consumed: { type: "boolean" } } }
+    },
+    {
+      name: "wait_for_directive",
+      description: "Poll for a directive until one arrives.",
+      inputSchema: { type: "object", properties: { timeout_seconds: { type: "number" } } }
+    }
+  ]
+}));
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name === "trigger_browser_call") {
-    const summary = request.params.arguments?.summary || "Ready for voice instruction";
-    
-    if (activeBrowserConnection && activeBrowserConnection.readyState === 1) {
-      activeBrowserConnection.send(JSON.stringify({ 
-        type: 'INCOMING_CALL', 
-        summary 
-      }));
-      return {
-        content: [{ type: "text", text: "Llamada enviada al navegador con éxito." }]
-      };
-    } else {
-      return {
-        isError: true,
-        content: [{ type: "text", text: "Error: La extensión de Chrome no está conectada al Relay (localhost:8081)." }]
-      };
+  const { name, arguments: args } = request.params;
+
+  switch (name) {
+    case "trigger_browser_call": {
+      const minutesSinceActivity = (Date.now() - lastBrowserActivity) / 1000 / 60;
+      
+      // Fallback a llamada telefónica si no hay actividad en 5 minutos
+      if (!activeBrowserConnection || activeBrowserConnection.readyState !== 1 || minutesSinceActivity > 5) {
+        console.error(`[Relay] Inactividad (${minutesSinceActivity}m). Triggering phone call fallback...`);
+        const result = await apiRequest('POST', '/trigger-call', {
+          agent_id: AGENT_ID,
+          summary: args.summary || "Inactivity fallback voice capture",
+          context: { browser_fallback: true }
+        });
+        return { content: [{ type: "text", text: `Usuario inactivo en Chrome. Se inició llamada telefónica como fallback: ${JSON.stringify(result)}` }] };
+      }
+
+      activeBrowserConnection.send(JSON.stringify({ type: 'INCOMING_CALL', summary: args.summary }));
+      return { content: [{ type: "text", text: "Llamada enviada al navegador." }] };
+    }
+
+    case "trigger_call": {
+      const result = await apiRequest('POST', '/trigger-call', {
+        agent_id: AGENT_ID,
+        summary: args.summary,
+        context: args.context
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    case "get_directive": {
+        const result = await apiRequest('GET', `/get-directive?agent_id=${AGENT_ID}&include_consumed=${!!args.include_consumed}`);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    case "wait_for_directive": {
+        // Implementación básica de polling (igual que middleware-client.js original)
+        const timeoutSeconds = args.timeout_seconds || 600;
+        const start = Date.now();
+        while (Date.now() - start < timeoutSeconds * 1000) {
+            const res = await apiRequest('GET', `/get-directive?agent_id=${AGENT_ID}`);
+            if (res && (res.directive || res.instruction)) {
+                return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+            }
+            await new Promise(r => setTimeout(r, 30000));
+        }
+        return { content: [{ type: "text", text: "Timeout waiting for directive." }] };
     }
   }
-  
-  throw new Error(`Herramienta no encontrada: ${request.params.name}`);
+  throw new Error("Tool not found");
 });
 
-// Iniciar el Transporte Stdio
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("Gemini Voice Relay MCP Server running on stdio");
+console.error("Relay MCP Server running");

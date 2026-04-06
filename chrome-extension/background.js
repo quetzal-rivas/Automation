@@ -12,6 +12,9 @@ function connectToRelay() {
     const data = JSON.parse(event.data);
     if (data.type === 'INCOMING_CALL') {
       showCallOverlay();
+    } else if (data.type === 'AUDIO_CHUNK') {
+      // Forward to offscreen for playback
+      chrome.runtime.sendMessage(data);
     }
   };
 
@@ -37,12 +40,20 @@ async function showCallOverlay() {
   }
 }
 
-// Manejar los mensajes de la UI (Contestar / Colgar)
+// Manejar los mensajes de la UI y del Content Script (Activity)
+let lastActivityTime = Date.now();
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'VOICE_ANSWER') {
     startOffscreenAudio();
   } else if (message.type === 'VOICE_DECLINE') {
     if (socket) socket.send(JSON.stringify({ type: 'CALL_DECLINED' }));
+  } else if (message.type === 'USER_ACTIVITY') {
+    lastActivityTime = Date.now();
+    // Forward heartbeat immediately if socket is open
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'HEARTBEAT' }));
+    }
   }
 });
 
@@ -54,6 +65,22 @@ async function startOffscreenAudio() {
     justification: 'Comunicación por voz con Gemini'
   });
 }
+
+// Manejar click en el icono de la extensión (WAKE UP)
+chrome.action.onClicked.addListener(async (tab) => {
+  console.log('[Bridge] Extensión clickeada - Iniciando llamada');
+  
+  // 1. Mostrar el overlay visual inmediatamente
+  chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ['overlay.js']
+  });
+
+  // 2. Notificar al Relay (opcional, para que el IDE sepa que el usuario inició la voz)
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'VOICE_START' }));
+  }
+});
 
 // Iniciar conexión al cargar
 connectToRelay();
