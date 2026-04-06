@@ -11,6 +11,33 @@ function initAudioContext() {
   }
 }
 
+function playRingTone() {
+  initAudioContext();
+  if (ringInterval) return;
+  const ring = () => {
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc1.frequency.setValueAtTime(440, audioContext.currentTime);
+    osc2.frequency.setValueAtTime(480, audioContext.currentTime);
+    osc1.connect(gain); osc2.connect(gain);
+    gain.connect(audioContext.destination);
+    gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+    osc1.start(); osc2.start();
+    osc1.stop(audioContext.currentTime + 1.5); osc2.stop(audioContext.currentTime + 1.5);
+  };
+  ring();
+  ringInterval = setInterval(ring, 3000);
+}
+
+function stopRingTone() {
+  if (ringInterval) {
+    clearInterval(ringInterval);
+    ringInterval = null;
+  }
+}
+
 async function startAudio() {
   try {
     initAudioContext();
@@ -20,7 +47,6 @@ async function startAudio() {
       audio: { channelCount: 1, sampleRate: 16000 } 
     });
     
-    // Conectar al Relay
     relaySocket = new WebSocket('ws://127.0.0.1:8081');
     relaySocket.onopen = () => {
       console.log('[Offscreen] Conectado al Relay Local');
@@ -70,9 +96,15 @@ function playPcmChunk(base64Data) {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'AUDIO_CHUNK') {
     playPcmChunk(msg.data);
+  } else if (msg.type === 'PLAY_RING') {
+    playRingTone();
+  } else if (msg.type === 'STOP_RING') {
+    stopRingTone();
   } else if (msg.type === 'START_MIC') {
+    stopRingTone();
     startAudio();
   } else if (msg.type === 'STOP_AUDIO') {
+    stopRingTone();
     if (stream) stream.getTracks().forEach(t => t.stop());
     if (audioContext) audioContext.close();
     audioContext = null;
