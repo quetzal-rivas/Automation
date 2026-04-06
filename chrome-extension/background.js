@@ -39,6 +39,11 @@ async function showCallOverlay(data) {
         func: (payload) => { window.lastGeminiMessage = payload; },
         args: [data]
       });
+      // Iniciar el timbre si es una llamada entrante
+      if (data.type === 'INCOMING_CALL') {
+          await startOffscreenAudio();
+          chrome.runtime.sendMessage({ type: 'PLAY_RING' });
+      }
     }
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -52,8 +57,10 @@ let lastActivityTime = Date.now();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'VOICE_ANSWER') {
-    startOffscreenAudio();
+    chrome.runtime.sendMessage({ type: 'STOP_RING' }); // Parar timbre
+    chrome.runtime.sendMessage({ type: 'START_MIC' }); // Activar micro
   } else if (message.type === 'VOICE_DECLINE') {
+    chrome.runtime.sendMessage({ type: 'STOP_RING' }); // Parar timbre
     if (socket) socket.send(JSON.stringify({ type: 'CALL_DECLINED' }));
   } else if (message.type === 'USER_ACTIVITY') {
     lastActivityTime = Date.now();
@@ -66,10 +73,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Lanzar el audio en segundo plano (para acceso a micro)
 async function startOffscreenAudio() {
+  // Verificar si ya existe
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT']
+  });
+
+  if (existingContexts.length > 0) return;
+
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: ['AUDIO_PLAYBACK', 'USER_MEDIA'],
-    justification: 'Comunicación por voz con Gemini'
+    justification: 'Comunicación por voz con Gemini y timbre de llamada'
   });
 }
 

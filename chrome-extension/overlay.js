@@ -1,12 +1,12 @@
 // Estilos inyectados directamente para un diseño futurista (Burbuja Flotante)
 const styles = `
   #gemini-voice-bubble {
-    position: fixed;
-    bottom: 40px;
-    right: 40px;
-    z-index: 1000000;
-    width: 65px;
-    height: 65px;
+    position: fixed !important;
+    bottom: 50px !important;
+    right: 50px !important;
+    z-index: 2147483647 !important; /* Max z-index possible */
+    width: 70px;
+    height: 70px;
     display: flex;
     align-items: center;
     justify-content: center;

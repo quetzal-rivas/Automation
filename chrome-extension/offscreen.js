@@ -50,18 +50,62 @@ async function startAudio() {
   }
 }
 
-// Escuchar mensajes del background (Audio o Stop)
+// Escuchar mensajes del background (Audio, Ring o Stop)
+let ringInterval = null;
+
+function initAudioContext() {
+  if (!audioContext) {
+    audioContext = new AudioContext({ sampleRate: 16000 });
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+}
+
+function playRingTone() {
+  initAudioContext();
+  if (ringInterval) return;
+  const ring = () => {
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc1.frequency.setValueAtTime(440, audioContext.currentTime);
+    osc2.frequency.setValueAtTime(480, audioContext.currentTime);
+    osc1.connect(gain); osc2.connect(gain);
+    gain.connect(audioContext.destination);
+    gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+    osc1.start(); osc2.start();
+    osc1.stop(audioContext.currentTime + 1.5); osc2.stop(audioContext.currentTime + 1.5);
+  };
+  ring();
+  ringInterval = setInterval(ring, 3000);
+}
+
+function stopRingTone() {
+  if (ringInterval) {
+    clearInterval(ringInterval);
+    ringInterval = null;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'AUDIO_CHUNK') {
     playPcmChunk(msg.data);
+  } else if (msg.type === 'PLAY_RING') {
+    playRingTone();
+  } else if (msg.type === 'STOP_RING') {
+    stopRingTone();
+  } else if (msg.type === 'START_MIC') {
+    startAudio();
   } else if (msg.type === 'STOP_AUDIO') {
+    stopRingTone();
     stopAudio();
   }
 });
 
 function playPcmChunk(base64Data) {
-  if (!audioContext) return;
-  
+  initAudioContext();
   const binary = atob(base64Data);
   const pcm16 = new Int16Array(new Uint8Array([...binary].map(c => c.charCodeAt(0))).buffer);
   const float32 = new Float32Array(pcm16.length);
@@ -74,7 +118,6 @@ function playPcmChunk(base64Data) {
   source.buffer = buffer;
   source.connect(audioContext.destination);
   
-  // Reproducción balanceada (evita clics entre chunks)
   const currentTime = audioContext.currentTime;
   if (nextStartTime < currentTime) nextStartTime = currentTime;
   source.start(nextStartTime);
@@ -84,7 +127,7 @@ function playPcmChunk(base64Data) {
 function stopAudio() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   if (audioContext) audioContext.close();
+  audioContext = null;
   if (relaySocket) relaySocket.close();
+  relaySocket = null;
 }
-
-startAudio();
