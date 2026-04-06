@@ -50,6 +50,11 @@ const styles = `
     100% { transform: scale(2.2); opacity: 0; }
   }
 
+  #gemini-voice-bubble.success .gemini-pulse-container {
+    background: linear-gradient(135deg, #00c853, #64dd17);
+    box-shadow: 0 0 25px rgba(0, 200, 83, 0.5);
+  }
+
   .gemini-mic-icon {
     font-size: 24px;
     color: white;
@@ -60,7 +65,7 @@ const styles = `
   .gemini-bubble-label {
     position: absolute;
     right: 80px;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.2);
     padding: 8px 16px;
@@ -86,7 +91,7 @@ const styles = `
     position: absolute;
     top: -5px;
     right: -5px;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0,0,0,0.8);
     color: white;
     width: 20px;
     height: 20px;
@@ -117,26 +122,35 @@ const styleEl = document.createElement('style');
 styleEl.textContent = styles;
 document.head.appendChild(styleEl);
 
+// Datos recibidos desde background
+const payload = window.lastGeminiMessage || { type: 'INCOMING_CALL' };
+const isResult = payload.type === 'TASK_COMPLETED';
+const labelText = isResult ? payload.result : 'Escuchando...';
+
 // Crear UI de la burbuja
 const bubble = document.createElement('div');
 bubble.id = 'gemini-voice-bubble';
+if (isResult) bubble.classList.add('success');
+
 bubble.innerHTML = `
-  <div class="gemini-bubble-label">Escuchando...</div>
+  <div class="gemini-bubble-label" style="${isResult ? 'opacity: 1; transform: translateX(0);' : ''}">${labelText}</div>
   <button class="gemini-close-bubble" id="close-gemini-bubble">✕</button>
   <div class="gemini-pulse-container">
     <div class="gemini-wave"></div>
-    <div class="gemini-wave"></div>
-    <div class="gemini-wave"></div>
+    ${isResult ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : `
     <svg class="gemini-mic-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
       <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
       <line x1="12" y1="19" x2="12" y2="23"></line>
       <line x1="8" y1="23" x2="16" y2="23"></line>
-    </svg>
+    </svg>`}
   </div>
 `;
 
 document.body.appendChild(bubble);
+
+// Limpiar mensaje global una vez consumido
+window.lastGeminiMessage = null;
 
 // Manejo de eventos
 document.getElementById('close-gemini-bubble').onclick = (e) => {

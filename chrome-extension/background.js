@@ -10,8 +10,8 @@ function connectToRelay() {
 
   socket.onmessage = (event) => {
     const data = JSON.parse(event.data);
-    if (data.type === 'INCOMING_CALL') {
-      showCallOverlay();
+    if (data.type === 'INCOMING_CALL' || data.type === 'TASK_COMPLETED') {
+      showCallOverlay(data);
     } else if (data.type === 'AUDIO_CHUNK') {
       // Forward to offscreen for playback
       chrome.runtime.sendMessage(data);
@@ -30,9 +30,16 @@ function connectToRelay() {
 }
 
 // Inyectar el overlay visual en la pestaña actual
-async function showCallOverlay() {
+async function showCallOverlay(data) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab) {
+    if (data) {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (payload) => { window.lastGeminiMessage = payload; },
+        args: [data]
+      });
+    }
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
       files: ['overlay.js']

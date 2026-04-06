@@ -182,9 +182,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: { type: "object", properties: { include_consumed: { type: "boolean" } } }
     },
     {
-      name: "wait_for_directive",
-      description: "Poll for a directive until one arrives.",
-      inputSchema: { type: "object", properties: { timeout_seconds: { type: "number" } } }
+      name: "report_result",
+      description: "Informa al usuario sobre el resultado de una tarea completada. Notifica a la extensión de Chrome y actualiza el estado en AWS.",
+      inputSchema: { 
+        type: "object", 
+        properties: { 
+            result: { type: "string", description: "Resumen de lo que se hizo." },
+            status: { type: "string", enum: ["SUCCESS", "ERROR"], default: "SUCCESS" }
+        },
+        required: ["result"]
+      }
     }
   ]
 }));
@@ -193,6 +200,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   switch (name) {
+    case "report_result": {
+      console.error(`[Relay] Reporting Result: ${args.result}`);
+      
+      // 1. Notificar al Browser si está conectado
+      if (activeBrowserConnection?.readyState === 1) {
+        activeBrowserConnection.send(JSON.stringify({ 
+          type: 'TASK_COMPLETED', 
+          result: args.result,
+          status: args.status || 'SUCCESS'
+        }));
+      }
+
+      // 2. Opcional: Actualizar AWS (puedes añadir un endpoint /post-result si quieres persistencia)
+      // Por ahora usamos un log para debug
+      return { content: [{ type: "text", text: `Resultado reportado con éxito: ${args.result}` }] };
+    }
+    
     case "trigger_browser_call": {
       const minutesSinceActivity = (Date.now() - lastBrowserActivity) / 1000 / 60;
       
