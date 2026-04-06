@@ -113,9 +113,9 @@ function startGeminiSession() {
     const response = JSON.parse(rawData);
     console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 150) + '...');
     
-    if (response.setup_complete) {
+    if (response.setup_complete || response.setupComplete) {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
-        isGeminiReady = true; // ¡ABRIMOS EL SEMÁFORO!
+        isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
         geminiWs.send(JSON.stringify({
           client_content: {
             turns: [{ role: "user", parts: [{ text: "Hola. Preséntate de forma corta." }] }],
