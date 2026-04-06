@@ -78,18 +78,30 @@ function startGeminiSession() {
     
     const setupMsg = {
       setup: {
-        model: "models/gemini-2.0-flash-exp",
-        generation_config: { response_modalities: ["audio"] }
+        model: "models/gemini-2.0-flash", // Modelo estable para Live
+        generation_config: { response_modalities: ["audio"] },
+        tools: [{
+          function_declarations: [{
+            name: "send_directive",
+            description: "Envia una instrucción al agente Antigravity para modificar código.",
+            parameters: { 
+              type: "object", 
+              properties: { instruction: { type: "string" } },
+              required: ["instruction"]
+            }
+          }]
+        }],
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
       }
     };
-    console.error('[Gemini] 📤 Enviando SETUP MÍNIMO:', JSON.stringify(setupMsg));
+    console.error('[Gemini] 📤 Enviando SETUP COMPLETO:', JSON.stringify(setupMsg, null, 2));
     geminiWs.send(JSON.stringify(setupMsg));
   });
 
   geminiWs.on('message', async (data) => {
     const rawData = data.toString();
-    console.error(`[Gemini] 📥 RAW DATA RECIBIDA (${rawData.length} bytes):`, rawData.slice(0, 500));
     const response = JSON.parse(rawData);
+    console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 150) + '...');
     
     if (response.setup_complete) {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
@@ -121,9 +133,9 @@ function startGeminiSession() {
   });
 
   geminiWs.on('error', (err) => console.error('[Gemini] Error:', err));
-  geminiWs.on('close', () => { 
-      console.error('[Gemini] Sesión cerrada');
-      geminiWs = null; 
+  geminiWs.on('close', (code, reason) => { 
+    console.error(`[Gemini] 🔴 Sesión cerrada por Google. Código: ${code}, Razón: ${reason}`);
+    geminiWs = null; 
   });
 }
 
