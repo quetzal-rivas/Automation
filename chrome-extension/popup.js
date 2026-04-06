@@ -5,14 +5,15 @@ const badge = document.getElementById('status-badge');
 const subText = document.getElementById('sub-text');
 
 function updateUI(status) {
+    console.log(`[Popup] Actualizando UI a estado: ${status}`);
     badge.style.display = 'block';
     badge.innerText = `Estado: ${status}`;
     
     if (status === 'CONNECTING') {
         btn.className = 'state-connecting';
-        text.innerText = 'Buscando enlace...';
+        text.innerText = 'Llamando...';
         loader.style.display = 'block';
-        subText.innerText = 'Escucha el timbre... estableciendo canal.';
+        subText.innerText = 'Buscando enlace seguro con Gemini 3.1';
         subText.className = 'pulse-pink';
     } else if (status === 'CONNECTED') {
         btn.className = 'state-connected';
@@ -29,11 +30,6 @@ function updateUI(status) {
     }
 }
 
-// Al abrir el popup, pedimos el estado actual
-chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
-    if (response) updateUI(response.status);
-});
-
 // Escuchar cambios de estado desde el background
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'STATUS_UPDATED') {
@@ -41,17 +37,32 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
 });
 
-btn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
+btn.addEventListener('click', async () => {
+    console.log('[Popup] Usuario hizo clic en Iniciar/Colgar');
+    
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, async (response) => {
         if (response.status === 'CONNECTED') {
             chrome.runtime.sendMessage({ type: 'HANG_UP' });
-        } else if (response.status === 'DISCONNECTED') {
-            chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
-            updateUI('CONNECTING');
+        } else {
+            try {
+                console.log('[Popup] Pidiendo permiso de micro local');
+                // Intentar el permiso de micro justo al hacer clic (esto es un gesto del usuario)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(t => t.stop()); // Solo queremos el permiso
+                
+                console.log('[Popup] Permiso de micro concedido. Iniciando sesión...');
+                chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
+                updateUI('CONNECTING');
+            } catch (e) {
+                console.error('[Popup] Error de permiso de micro:', e);
+                subText.innerText = '¡Necesitas habilitar el micrófono para continuar!';
+                subText.style.color = '#ef4444';
+            }
         }
     });
 });
 
-document.getElementById('perm-hint').addEventListener('click', async () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('grant.html') });
+// Al abrir, preguntar el estado
+chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
+  if (response) updateUI(response.status);
 });
