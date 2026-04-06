@@ -41,22 +41,24 @@ btn.addEventListener('click', async () => {
     console.log('[Popup] Usuario hizo clic en Iniciar/Colgar');
     
     chrome.runtime.sendMessage({ type: 'GET_STATUS' }, async (response) => {
-        if (response.status === 'CONNECTED') {
+        if (response && response.status === 'CONNECTED') {
             chrome.runtime.sendMessage({ type: 'HANG_UP' });
         } else {
             try {
-                console.log('[Popup] Pidiendo permiso de micro local');
-                // Intentar el permiso de micro justo al hacer clic (esto es un gesto del usuario)
+                console.log('[Popup] Intentando pedir permiso de micro local...');
+                // Algunos navegadores permiten pedirlo en el popup si es gesto de usuario
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(t => t.stop()); // Solo queremos el permiso
+                stream.getTracks().forEach(t => t.stop());
                 
                 console.log('[Popup] Permiso de micro concedido. Iniciando sesión...');
                 chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
                 updateUI('CONNECTING');
             } catch (e) {
-                console.error('[Popup] Error de permiso de micro:', e);
-                subText.innerText = '¡Necesitas habilitar el micrófono para continuar!';
-                subText.style.color = '#ef4444';
+                console.warn('[Popup] Chrome bloqueó el micro en el popup. Abriendo Motor de Voz en pestaña...');
+                // SI FALLA EN EL POPUP, ABRIMOS LA PESTAÑA DEL MOTOR DE VOZ
+                chrome.tabs.create({ url: chrome.runtime.getURL('mic.html'), pinned: true });
+                updateUI('CONNECTING');
+                chrome.runtime.sendMessage({ type: 'VOICE_START_REQUEST' });
             }
         }
     });
