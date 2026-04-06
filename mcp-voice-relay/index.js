@@ -77,29 +77,18 @@ function startGeminiSession() {
     
     const setupMsg = {
       setup: {
-        model: "models/gemini-live-3.1-flash",
-        generation_config: { response_modalities: ["audio"] },
-        tools: [{
-          function_declarations: [{
-            name: "send_directive",
-            description: "Envia una instrucción al agente Antigravity.",
-            parameters: { 
-              type: "object", 
-              properties: { instruction: { type: "string" } },
-              required: ["instruction"]
-            }
-          }]
-        }],
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
+        model: "models/gemini-2.0-flash-exp",
+        generation_config: { response_modalities: ["audio"] }
       }
     };
-    console.error('[Gemini] 📤 Enviando mensaje de SETUP:', JSON.stringify(setupMsg, null, 2));
+    console.error('[Gemini] 📤 Enviando SETUP MÍNIMO:', JSON.stringify(setupMsg));
     geminiWs.send(JSON.stringify(setupMsg));
   });
 
   geminiWs.on('message', async (data) => {
-    const response = JSON.parse(data.toString());
-    console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 200) + '...');
+    const rawData = data.toString();
+    console.error(`[Gemini] 📥 RAW DATA RECIBIDA (${rawData.length} bytes):`, rawData.slice(0, 500));
+    const response = JSON.parse(rawData);
     
     if (response.setup_complete) {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');

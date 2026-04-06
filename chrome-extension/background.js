@@ -61,6 +61,14 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     await startOffscreenAudio();
     chrome.runtime.sendMessage({ type: 'PLAY_RING' });
 
+    // ESTO FALTABA: Avisar al Relay que despierte a Gemini
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        console.log('[Background] Enviando VOICE_START al Relay local');
+        socket.send(JSON.stringify({ type: 'VOICE_START' }));
+    } else {
+        console.error('[Background] El socket del Relay NO está abierto');
+    }
+
   } else if (message.type === 'PCM_CHUNK') {
     // REENVIAR AUDIO DEL MICRÓFONO (DESDE EL TAB) AL RELAY
     const buffer = Uint8Array.from(atob(message.data), c => c.charCodeAt(0)).buffer;
