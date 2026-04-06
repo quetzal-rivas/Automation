@@ -62,21 +62,18 @@ wss.on('connection', (ws) => {
 
 // --- Lógica Gemini Multimodal Live ---
 function startGeminiSession() {
-  if (geminiWs) {
-      console.error('[Gemini] Sesión ya activa, ignorando');
-      return;
-  }
-  
+  if (geminiWs) return;
   if (!GEMINI_API_KEY) {
-      console.error('[Gemini] ERROR: GEMINI_API_KEY no configurado');
+      console.error('[Gemini] 🔴 ERROR: GEMINI_API_KEY no detectada. Revisa tu .env o mcp_config.json');
       return;
   }
 
   const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+  console.error(`[Gemini] 📡 Iniciando conexión... (URL: ...key=${GEMINI_API_KEY.slice(0, 5)}***)`);
   geminiWs = new WebSocket(url);
 
   geminiWs.on('open', () => {
-    console.error(`[Gemini] Conexión abierta (AGENT: ${AGENT_ID})`);
+    console.error('[Gemini] 🟢 Conexión con Google ABIERTA');
     
     const setupMsg = {
       setup: {
@@ -93,23 +90,22 @@ function startGeminiSession() {
             }
           }]
         }],
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT + " Cuando el usuario quiera realizar cambios, usa 'send_directive'." }] }
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
       }
     };
+    console.error('[Gemini] 📤 Enviando mensaje de SETUP:', JSON.stringify(setupMsg, null, 2));
     geminiWs.send(JSON.stringify(setupMsg));
   });
 
   geminiWs.on('message', async (data) => {
     const response = JSON.parse(data.toString());
+    console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 200) + '...');
     
     if (response.setup_complete) {
-        console.error('[Gemini] Setup completo. Enviando saludo inicial...');
+        console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
         geminiWs.send(JSON.stringify({
           client_content: {
-            turns: [{
-              role: "user",
-              parts: [{ text: "Hola. Salúdame de forma futurista y corta." }]
-            }],
+            turns: [{ role: "user", parts: [{ text: "Hola. Salúdame de forma corta." }] }],
             turn_complete: true
           }
         }));
