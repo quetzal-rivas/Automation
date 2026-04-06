@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = "Eres un asistente de codificación por voz. Tienes acceso
 
 let activeBrowserConnection = null;
 let geminiWs = null;
-let lastBrowserActivity = Date.now(); // Track last browser interaction
+let lastBrowserActivity = Date.now();
 
 // --- Servidor de WebSockets para Chrome Extension ---
 const wss = new WebSocketServer({ port: parseInt(process.env.WEBSOCKET_PORT || '8081'), host: "0.0.0.0" });
@@ -34,17 +34,15 @@ wss.on('connection', (ws) => {
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'HEARTBEAT') {
-        lastBrowserActivity = Date.now(); // Reset on every heartbeat or activity report
+        lastBrowserActivity = Date.now();
         return;
       }
-      
       if (msg.type === 'VOICE_START' || msg.type === 'VOICE_ANSWER') {
         startGeminiSession();
-      } else if (msg.type === 'VOICE_DECLINE') {
+      } else if (msg.type === 'VOICE_DECLINE' || msg.type === 'CALL_DECLINED') {
         stopGeminiSession();
       }
     } catch (e) {
-      // Audio PCM logic...
       if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
         geminiWs.send(JSON.stringify({
           realtime_input: {
@@ -64,16 +62,25 @@ wss.on('connection', (ws) => {
 
 // --- Lógica Gemini Multimodal Live ---
 function startGeminiSession() {
-  if (geminiWs) return;
+  if (geminiWs) {
+      console.error('[Gemini] Sesión ya activa, ignorando');
+      return;
+  }
+  
+  if (!GEMINI_API_KEY) {
+      console.error('[Gemini] ERROR: GEMINI_API_KEY no configurado');
+      return;
+  }
 
   const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
   geminiWs = new WebSocket(url);
 
   geminiWs.on('open', () => {
-    console.error('[Gemini] Conexión abierta. Enviando configuracion...');
+    console.error(`[Gemini] Conexión abierta (AGENT: ${AGENT_ID})`);
+    
     const setupMsg = {
       setup: {
-        model: "models/gemini-2.0-flash-exp",
+        model: "models/gemini-live-3.1-flash",
         generation_config: { response_modalities: ["audio"] },
         tools: [{
           function_declarations: [{
@@ -94,14 +101,14 @@ function startGeminiSession() {
 
   geminiWs.on('message', async (data) => {
     const response = JSON.parse(data.toString());
-
+    
     if (response.setup_complete) {
-        console.error('[Gemini] Setup completo. Pidiendo saludo inicial...');
+        console.error('[Gemini] Setup completo. Enviando saludo inicial...');
         geminiWs.send(JSON.stringify({
           client_content: {
             turns: [{
               role: "user",
-              parts: [{ text: "Hola. Salúdame de forma futurista y pregúntame qué vamos a construir hoy. Sé breve." }]
+              parts: [{ text: "Hola. Salúdame de forma futurista y corta." }]
             }],
             turn_complete: true
           }
@@ -128,18 +135,22 @@ function startGeminiSession() {
   });
 
   geminiWs.on('error', (err) => console.error('[Gemini] Error:', err));
-  geminiWs.on('close', () => { geminiWs = null; });
+  geminiWs.on('close', () => { 
+      console.error('[Gemini] Sesión cerrada');
+      geminiWs = null; 
+  });
 }
 
 function stopGeminiSession() {
     if (geminiWs) {
+        console.error('[Gemini] Deteniendo sesión activa');
         geminiWs.close();
         geminiWs = null;
     }
 }
 
-// --- Middleware API Client (Simplified Client for trigger_call / get_directive) ---
 async function apiRequest(method, path, body = null) {
+  if (!API_BASE_URL) return { error: 'API_BASE_URL no configurado' };
   const url = `${API_BASE_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
   const response = await fetch(url, {
     method,
@@ -150,11 +161,9 @@ async function apiRequest(method, path, body = null) {
     },
     body: body ? JSON.stringify(body) : undefined
   });
-  if (!response.ok) throw new Error(`API Error: ${response.status}`);
   return response.json();
 }
 
-// --- Tools Implementation ---
 async function handleToolCall(call) {
   console.error(`[Tool] Ejecutando: ${call.name}`, call.args);
   const root = '/Users/aztecgod/Active-Projects/Automation';
@@ -163,121 +172,53 @@ async function handleToolCall(call) {
     const directivePath = path.join(root, 'VOICE_DIRECTIVE.md');
     const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${new Date().toISOString()}\n`;
     await fs.writeFile(directivePath, content);
-    return "Directiva enviada a Antigravity.";
+    return "Directiva enviada.";
   }
   return "Herramienta no implementada";
 }
 
-// --- Servidor MCP ---
 const server = new Server({ name: "gemini-voice-relay", version: "1.0.0" }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "trigger_browser_call",
-      description: "Inicia la interfaz de voz en el navegador (Gemini Live). Si el usuario no está activo, puede caer a llamada telefónica.",
+      description: "Inicia la interfaz de voz en el navegador.",
       inputSchema: { type: "object", properties: { summary: { type: "string" } } }
     },
     {
       name: "trigger_call",
-      description: "Trigger an outbound phone call (ElevenLabs) for this agent.",
-      inputSchema: { 
-        type: "object", 
-        properties: { 
-            summary: { type: "string" },
-            context: { type: "object" }
-        },
-        required: ["summary"]
-      }
+      description: "Trigger outbound phone call.",
+      inputSchema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] }
     },
     {
-      name: "get_directive",
-      description: "Fetch the latest directive/state assigned to this AGENT_ID.",
-      inputSchema: { type: "object", properties: { include_consumed: { type: "boolean" } } }
-    },
-    {
-      name: "report_result",
-      description: "Informa al usuario sobre el resultado de una tarea completada. Notifica a la extensión de Chrome y actualiza el estado en AWS.",
-      inputSchema: { 
-        type: "object", 
-        properties: { 
-            result: { type: "string", description: "Resumen de lo que se hizo." },
-            status: { type: "string", enum: ["SUCCESS", "ERROR"], default: "SUCCESS" }
-        },
-        required: ["result"]
-      }
+        name: "report_result",
+        description: "Report task completion.",
+        inputSchema: { type: "object", properties: { result: { type: "string" } }, required: ["result"] }
     }
   ]
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-
   switch (name) {
     case "report_result": {
-      console.error(`[Relay] Reporting Result: ${args.result}`);
-      
-      // 1. Notificar al Browser si está conectado
       if (activeBrowserConnection?.readyState === 1) {
-        activeBrowserConnection.send(JSON.stringify({ 
-          type: 'TASK_COMPLETED', 
-          result: args.result,
-          status: args.status || 'SUCCESS'
-        }));
+        activeBrowserConnection.send(JSON.stringify({ type: 'TASK_COMPLETED', result: args.result }));
       }
-
-      // 2. Opcional: Actualizar AWS (puedes añadir un endpoint /post-result si quieres persistencia)
-      // Por ahora usamos un log para debug
-      return { content: [{ type: "text", text: `Resultado reportado con éxito: ${args.result}` }] };
+      return { content: [{ type: "text", text: "OK" }] };
     }
-    
     case "trigger_browser_call": {
-      const minutesSinceActivity = (Date.now() - lastBrowserActivity) / 1000 / 60;
-      
-      // Fallback a llamada telefónica si no hay actividad en 5 minutos
-      if (!activeBrowserConnection || activeBrowserConnection.readyState !== 1 || minutesSinceActivity > 5) {
-        console.error(`[Relay] Inactividad (${minutesSinceActivity}m). Triggering phone call fallback...`);
-        const result = await apiRequest('POST', '/trigger-call', {
-          agent_id: AGENT_ID,
-          summary: args.summary || "Inactivity fallback voice capture",
-          context: { browser_fallback: true }
-        });
-        return { content: [{ type: "text", text: `Usuario inactivo en Chrome. Se inició llamada telefónica como fallback: ${JSON.stringify(result)}` }] };
-      }
-
-      activeBrowserConnection.send(JSON.stringify({ type: 'INCOMING_CALL', summary: args.summary }));
-      return { content: [{ type: "text", text: "Llamada enviada al navegador." }] };
+      if (!activeBrowserConnection) return { content: [{ type: "text", text: "No browser connected" }] };
+      activeBrowserConnection.send(JSON.stringify({ type: 'INCOMING_CALL' }));
+      return { content: [{ type: "text", text: "Calling..." }] };
     }
-
     case "trigger_call": {
-      const result = await apiRequest('POST', '/trigger-call', {
-        agent_id: AGENT_ID,
-        summary: args.summary,
-        context: args.context
-      });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    }
-
-    case "get_directive": {
-        const result = await apiRequest('GET', `/get-directive?agent_id=${AGENT_ID}&include_consumed=${!!args.include_consumed}`);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-    }
-
-    case "wait_for_directive": {
-        // Implementación básica de polling (igual que middleware-client.js original)
-        const timeoutSeconds = args.timeout_seconds || 600;
-        const start = Date.now();
-        while (Date.now() - start < timeoutSeconds * 1000) {
-            const res = await apiRequest('GET', `/get-directive?agent_id=${AGENT_ID}`);
-            if (res && (res.directive || res.instruction)) {
-                return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
-            }
-            await new Promise(r => setTimeout(r, 30000));
-        }
-        return { content: [{ type: "text", text: "Timeout waiting for directive." }] };
+        const result = await apiRequest('POST', '/trigger-call', { agent_id: AGENT_ID, summary: args.summary });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
     }
   }
-  throw new Error("Tool not found");
+  throw new Error("Not found");
 });
 
 const transport = new StdioServerTransport();
