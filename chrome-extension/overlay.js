@@ -1,166 +1,89 @@
 // Estilos inyectados directamente para un diseño futurista (Burbuja Flotante)
 const styles = `
   #gemini-voice-bubble {
-    position: fixed !important;
-    bottom: 50px !important;
-    right: 50px !important;
-    z-index: 2147483647 !important; /* Max z-index possible */
-    width: 70px;
-    height: 70px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    animation: fadeInScale 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    position: fixed !important; bottom: 50px !important; right: 50px !important; z-index: 2147483647 !important;
+    width: 70px; height: 70px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; animation: fadeInScale 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
   }
-
-  @keyframes fadeInScale {
-    0% { transform: scale(0.5); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
+  .bubble-main {
+    position: relative; width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(12px); border: 2px solid rgba(155, 114, 243, 0.4);
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 40px rgba(0,0,0,0.4);
   }
-
-  .gemini-pulse-container {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #4285F4, #9b72f3, #e879f9);
-    box-shadow: 0 0 25px rgba(155, 114, 243, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: visible;
+  .pulse-ring {
+    position: absolute; width: 100%; height: 100%; border-radius: 50%;
+    background: radial-gradient(circle, rgba(167,139,250,0.6) 0%, transparent 70%);
+    animation: bubble-pulse 2s infinite ease-out;
   }
-
-  .gemini-wave {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: rgba(155, 114, 243, 0.3);
-    animation: geminiPulse 2s infinite ease-out;
-    pointer-events: none;
+  .bubble-inner {
+    width: 25px; height: 25px; border-radius: 50%;
+    background: #a78bfa; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
-  .gemini-wave:nth-child(2) { animation-delay: 0.6s; }
-  .gemini-wave:nth-child(3) { animation-delay: 1.2s; }
-
-  @keyframes geminiPulse {
-    0% { transform: scale(1); opacity: 0.8; }
-    100% { transform: scale(2.2); opacity: 0; }
-  }
-
-  #gemini-voice-bubble.success .gemini-pulse-container {
-    background: linear-gradient(135deg, #00c853, #64dd17);
-    box-shadow: 0 0 25px rgba(0, 200, 83, 0.5);
-  }
-
-  .gemini-mic-icon {
-    font-size: 24px;
-    color: white;
-    z-index: 2;
-  }
-
-  /* Tooltip Flotante */
-  .gemini-bubble-label {
-    position: absolute;
-    right: 80px;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 8px 16px;
-    border-radius: 30px;
-    color: white;
-    font-family: system-ui, -apple-system;
-    font-size: 13px;
-    font-weight: 500;
-    white-space: nowrap;
-    opacity: 0;
-    transform: translateX(10px);
-    transition: all 0.3s;
-    pointer-events: none;
-  }
-
-  #gemini-voice-bubble:hover .gemini-bubble-label {
-    opacity: 1;
-    transform: translateX(0);
-  }
-
-  /* Botón de cerrar */
-  .gemini-close-bubble {
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    background: rgba(0,0,0,0.8);
-    color: white;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    opacity: 0;
-    transition: opacity 0.2s;
-    border: none;
-    cursor: pointer;
-    z-index: 10;
-  }
-
-  #gemini-voice-bubble:hover .gemini-close-bubble {
-    opacity: 1;
-  }
+  #gemini-voice-bubble.success .bubble-inner { background: #22c55e; box-shadow: 0 0 15px #22c55e; }
+  @keyframes bubble-pulse { 0% { transform: scale(0.9); opacity: 0.8; } 100% { transform: scale(1.6); opacity: 0; } }
+  @keyframes fadeInScale { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
 `;
 
-// Evitar duplicados
-if (document.getElementById('gemini-voice-bubble')) {
-    document.getElementById('gemini-voice-bubble').remove();
+function injectStyles() {
+    if (!document.getElementById('gemini-overlay-styles')) {
+        const styleSheet = document.createElement("style");
+        styleSheet.id = 'gemini-overlay-styles';
+        styleSheet.innerText = styles;
+        document.head.appendChild(styleSheet);
+    }
 }
 
-// Inyectar Estilos
-const styleEl = document.createElement('style');
-styleEl.textContent = styles;
-document.head.appendChild(styleEl);
+let micStream = null;
+let micContext = null;
 
-// Datos recibidos desde background
-const payload = window.lastGeminiMessage || { type: 'INCOMING_CALL' };
-const isResult = payload.type === 'TASK_COMPLETED';
-const labelText = isResult ? payload.result : 'Escuchando...';
+async function startMicCapture() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+    micContext = new AudioContext({ sampleRate: 16000 });
+    const source = micContext.createMediaStreamSource(micStream);
+    const processor = micContext.createScriptProcessor(4096, 1, 1);
+    
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      const pcm = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i++) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      chrome.runtime.sendMessage({ type: 'PCM_CHUNK', data: btoa(String.fromCharCode(...new Uint8Array(pcm.buffer))) });
+    };
 
-// Crear UI de la burbuja
-const bubble = document.createElement('div');
-bubble.id = 'gemini-voice-bubble';
-if (isResult) bubble.classList.add('success');
+    source.connect(processor);
+    processor.connect(micContext.destination);
+    console.log('[Overlay] Micrófono de pestaña activado');
+  } catch (err) {
+    console.error('[Overlay] Error al activar micro:', err);
+  }
+}
 
-bubble.innerHTML = `
-  <div class="gemini-bubble-label" style="${isResult ? 'opacity: 1; transform: translateX(0);' : ''}">${labelText}</div>
-  <button class="gemini-close-bubble" id="close-gemini-bubble">✕</button>
-  <div class="gemini-pulse-container">
-    <div class="gemini-wave"></div>
-    ${isResult ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : `
-    <svg class="gemini-mic-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-      <path d="M19 10v1a7 7 0 0 1-14 0v-1"></path>
-      <line x1="12" y1="19" x2="12" y2="23"></line>
-      <line x1="8" y1="23" x2="16" y2="23"></line>
-    </svg>`}
-  </div>
-`;
+function createBubbleUI() {
+    if (document.getElementById('gemini-voice-bubble')) return;
 
-document.body.appendChild(bubble);
+    const container = document.createElement('div');
+    container.id = 'gemini-voice-bubble';
+    container.innerHTML = `<div class="pulse-ring"></div><div class="bubble-main"><div class="bubble-inner"></div></div>`;
+    document.body.appendChild(container);
 
-// Limpiar mensaje global una vez consumido
-window.lastGeminiMessage = null;
+    container.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'VOICE_ANSWER' });
+        startMicCapture(); // Activar micro localmente al contestar
+    });
+}
 
-// Manejo de eventos
-document.getElementById('close-gemini-bubble').onclick = (e) => {
-  e.stopPropagation();
-  bubble.remove();
-  chrome.runtime.sendMessage({ type: 'VOICE_DECLINE' });
-};
+function showResult(resultText) {
+    const bubble = document.getElementById('gemini-voice-bubble');
+    if (bubble) bubble.classList.add('success');
+    console.log('[Overlay] Tarea completada:', resultText);
+}
 
-bubble.onclick = () => {
-    // Al hacer click en la burbuja, podemos resetearla o confirmar que estamos hablando
-    console.log('[Overlay] Micrófono activo');
-    chrome.runtime.sendMessage({ type: 'VOICE_ANSWER' });
-};
+injectStyles();
+createBubbleUI();
+
+if (window.lastGeminiMessage && window.lastGeminiMessage.type === 'TASK_COMPLETED') {
+    showResult(window.lastGeminiMessage.result);
+}

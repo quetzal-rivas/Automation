@@ -15,6 +15,7 @@ function connectToRelay() {
           chrome.runtime.sendMessage({ type: 'STOP_RING' });
           showCallOverlay();
       }
+      // Reenviar voz de Gemini al Offscreen para reproducirla
       chrome.runtime.sendMessage(data);
     }
   };
@@ -24,13 +25,6 @@ function connectToRelay() {
 async function showCallOverlay(data) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && !tab.url.startsWith('chrome://')) {
-    if (data) {
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (payload) => { window.lastGeminiMessage = payload; },
-        args: [data]
-      });
-    }
     chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['overlay.js'] });
   }
 }
@@ -41,10 +35,23 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   } else if (message.type === 'VOICE_START_REQUEST') {
     callStatus = 'CONNECTING';
     await startOffscreenAudio();
-    chrome.runtime.sendMessage({ type: 'START_MIC' });
-    chrome.runtime.sendMessage({ type: 'PLAY_RING' }); // Iniciar trino
+    chrome.runtime.sendMessage({ type: 'PLAY_RING' });
 
-  } else if (message.type === 'VOICE_DECLINE' || message.type === 'HANG_UP') {
+  } else if (message.type === 'PCM_CHUNK') {
+    // REENVIAR AUDIO DEL MICRÓFONO (DESDE EL TAB) AL RELAY
+    const buffer = Uint8Array.from(atob(message.data), c => c.charCodeAt(0)).buffer;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(buffer);
+    }
+
+  } else if (message.type === 'VOICE_ANSWER') {
+    chrome.runtime.sendMessage({ type: 'STOP_RING' });
+    // Avisar al Relay que el usuario contestó
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'VOICE_ANSWER' }));
+    }
+
+  } else if (message.type === 'HANG_UP') {
     callStatus = 'DISCONNECTED';
     if (socket) socket.send(JSON.stringify({ type: 'CALL_DECLINED' }));
     chrome.runtime.sendMessage({ type: 'STOP_AUDIO' });
@@ -60,8 +67,8 @@ async function startOffscreenAudio() {
   if (contexts.length > 0) return;
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
-    reasons: ['AUDIO_PLAYBACK', 'USER_MEDIA'],
-    justification: 'Gestión de audio para Gemini Live'
+    reasons: ['AUDIO_PLAYBACK'], // YA NO PEDIMOS USER_MEDIA (MICRO) AQUÍ
+    justification: 'Reproducción de voz de Gemini'
   });
 }
 
