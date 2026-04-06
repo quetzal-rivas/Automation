@@ -53,14 +53,5 @@ btn.addEventListener('click', () => {
 });
 
 document.getElementById('perm-hint').addEventListener('click', async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-    subText.innerText = '¡Micrófono configurado correctamente!';
-    subText.style.color = '#22c55e';
-    document.getElementById('perm-hint').style.display = 'none';
-  } catch (e) {
-    subText.innerText = 'Error al pedir permiso de micrófono.';
-    subText.style.color = '#ef4444';
-  }
+  chrome.tabs.create({ url: chrome.runtime.getURL('grant.html') });
 });
