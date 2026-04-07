@@ -68,6 +68,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
     nextStartTime = 0;
     console.log('[Offscreen] 💥 Audio abortado por interrupción del usuario');
+  } else if (msg.type === 'PLAY_TTS') {
+    // 🗣️ TTS NATIVO: El sistema habla por sí solo sin esperar a Gemini
+    const utterance = new SpeechSynthesisUtterance(msg.text);
+    utterance.lang = 'es-MX'; // Español latino
+    utterance.pitch = 1.1;    // Tono ligeramente computacional
+    window.speechSynthesis.speak(utterance);
   } else if (msg.type === 'STOP_AUDIO') {
     stopRingTone();
     if (audioContext) audioContext.close();
