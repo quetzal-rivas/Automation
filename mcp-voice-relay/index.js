@@ -43,15 +43,22 @@ let lastBrowserActivity = Date.now();
 let sessionStartTime = null;
 
 // ─────────────────────────────────────────────────────────
-// CRONÓMETRO GLOBAL DE LOGS (Telemetry)
+// CRONÓMETRO GLOBAL DE LOGS (Telemetry & UI Export)
 // ─────────────────────────────────────────────────────────
 const originalConsoleError = console.error;
 console.error = function (...args) {
-  if (!sessionStartTime) {
-    originalConsoleError('[Standby]', ...args);
-  } else {
+  let logPrefix = '[Standby]';
+  if (sessionStartTime) {
     const elapsed = ((Date.now() - sessionStartTime) / 1000).toFixed(2);
-    originalConsoleError(`[T+${elapsed}s]`, ...args);
+    logPrefix = `[T+${elapsed}s]`;
+  }
+  
+  originalConsoleError(logPrefix, ...args);
+
+  // Enviar copia del log directamente a la UI del Navegador (mic.html)
+  if (activeBrowserConnection && activeBrowserConnection.readyState === 1) {
+    const message = `${logPrefix} ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`;
+    activeBrowserConnection.send(JSON.stringify({ type: 'RELAY_LOG', message }));
   }
 };
 

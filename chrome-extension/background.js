@@ -27,6 +27,9 @@ function connectToRelay() {
       }
       // Reenviar voz de Gemini al Offscreen para reproducirla
       chrome.runtime.sendMessage(data);
+    } else if (data.type === 'PLAY_TTS' || data.type === 'RELAY_LOG') {
+      // Redirigir comandos asíncronos y logs directo al motor o la pantalla
+      chrome.runtime.sendMessage(data);
     }
   };
 
