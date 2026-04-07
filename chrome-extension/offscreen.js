@@ -19,8 +19,9 @@ function playRingTone() {
     osc2.frequency.setValueAtTime(480, audioContext.currentTime);
     osc1.connect(gain); osc2.connect(gain);
     gain.connect(audioContext.destination);
-    gain.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
+    // VOLUMEN DEL TRINO (Atenuado para no molestar ni interferir)
+    gain.gain.setValueAtTime(0.02, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1.5);
     osc1.start(); osc2.start();
     osc1.stop(audioContext.currentTime + 1.5); osc2.stop(audioContext.currentTime + 1.5);
   };

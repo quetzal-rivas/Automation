@@ -106,24 +106,21 @@ function classifyAnomalyScenario(preBuffer, postBufferDb) {
 function dispatchAnomalyToGemini(scenario, preBufferB64) {
   if (!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
   
-  console.error(`[VAD] 🚨 ANOMALÍA ENVIADA A GEMINI (Escenario: ${scenario})`);
+  console.error(`[VAD] 🚨 ANOMALÍA CAPTURADA LOCALMENTE (Escenario: ${scenario})`);
   
-  // Limpiamos la cola de audio en el navegador antes de enviar el análisis
+  // Limpiamos la cola de audio en el navegador
   if (activeBrowserConnection) {
     activeBrowserConnection.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
   }
 
+  /* BLOQUEAMOS EL SEND DE TEXTO TEMPORALMENTE PARA EVITAR ERROR 1007
   geminiWs.send(JSON.stringify({
     clientContent: {
-      turns: [{
-        role: "user",
-        parts: [{
-          text: `[ANOMALY_DETECTED] Escenario clasificado: ${scenario}. Se detectó un pico de energía superior a 90dB. Analiza el contexto y responde según el protocolo de tu system_instruction. Energía pre-evento en buffer de 25s ya procesada.`
-        }]
-      }],
+      turns: [{ role: "user", parts: [{ text: `[ANOMALY_DETECTED] ...` }] }],
       turnComplete: true
     }
   }));
+  */
 }
 
 // ─────────────────────────────────────────────────────────
@@ -162,7 +159,8 @@ wss.on('connection', (ws) => {
 
       // ── 2. DETECCIÓN DE ANOMALÍA (>90dB o delta >40dB en <100ms) ──
       const isAbsoluteAnomaly = dbLevel > ANOMALY_THRESHOLD_DB;
-      const isDeltaAnomaly = (dbLevel - lastDbLevel) > ANOMALY_DELTA_DB;
+      const validDelta = lastDbLevel > -100; // Evitar el salto infinito desde el silencio inicial
+      const isDeltaAnomaly = validDelta && (dbLevel - lastDbLevel) > ANOMALY_DELTA_DB;
       
       if ((isAbsoluteAnomaly || isDeltaAnomaly) && !anomalyDetectionTimeout) {
         console.error(`[VAD] 🚨 ANOMALÍA DETECTADA: ${dbLevel.toFixed(1)}dB (delta: ${(dbLevel - lastDbLevel).toFixed(1)}dB)`);

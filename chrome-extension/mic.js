@@ -51,6 +51,15 @@ function draw() {
   ctx.fillStyle = '#020617';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Calcular dB para la UI
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    sum += dataArray[i] * dataArray[i];
+  }
+  let rms = Math.sqrt(sum / dataArray.length);
+  let db = 20 * Math.log10(rms / 255 || 0.0001);
+
+  // Dibujar barras del osciloscopio
   const barWidth = (canvas.width / bufferLength) * 2.5;
   let barHeight;
   let x = 0;
@@ -61,6 +70,11 @@ function draw() {
     ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
     x += barWidth + 1;
   }
+
+  // Dibujar texto de Decibeles
+  ctx.font = 'bold 24px Inter, system-ui';
+  ctx.fillStyle = db > -40 ? '#60a5fa' : '#334155';
+  ctx.fillText(`${db.toFixed(1)} dB`, 20, 40);
 }
 
 // Escuchar para colgar
