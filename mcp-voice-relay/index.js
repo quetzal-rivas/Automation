@@ -430,8 +430,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: "trigger_browser_call",
-      description: "Inicia la interfaz de voz en el navegador del usuario.",
+      description: "Inicia la interfaz gráfica de llamada en el navegador del usuario.",
       inputSchema: { type: "object", properties: { summary: { type: "string" } } }
+    },
+    {
+      name: "voice_notification",
+      description: "Despierta la interfaz de audio y sintetiza una notificación de voz asíncrona directamente a los auriculares del usuario.",
+      inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] }
     },
     {
       name: "trigger_call",
@@ -452,6 +457,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "report_result": {
       activeBrowserConnection?.send(JSON.stringify({ type: 'TASK_COMPLETED', result: args.result }));
       return { content: [{ type: "text", text: "OK" }] };
+    }
+    case "voice_notification": {
+      if (!activeBrowserConnection) return { content: [{ type: "text", text: "Error: Navegador desconectado." }] };
+      activeBrowserConnection.send(JSON.stringify({ type: 'PLAY_TTS', text: args.message }));
+      return { content: [{ type: "text", text: "Notificación de voz transmitida con éxito al usuario." }] };
     }
     case "trigger_browser_call": {
       if (!activeBrowserConnection) return { content: [{ type: "text", text: "No browser connected" }] };
