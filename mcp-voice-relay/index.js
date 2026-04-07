@@ -38,6 +38,7 @@ let geminiWs = null;
 let isGeminiReady = false;
 let isGeminiSpeaking = false; // TRUE mientras Gemini genera audio de salida
 let isPassiveMode = false;   // TRUE en modo "Escucha de Bajo Consumo"
+let isBargeInCooldown = false; // TRUE corta el stream entrante tras interrumpir
 let lastBrowserActivity = Date.now();
 let sessionStartTime = null;
 
@@ -215,8 +216,9 @@ wss.on('connection', (ws) => {
       if (dbLevel <= effectiveThreshold) return; // SILENCIO → ahorro de tokens
 
       // ── 4. BARGE-IN AGRESIVO: Si Gemini habla y el usuario irrumpe ──
-      if (isGeminiSpeaking && dbLevel > BARGE_IN_THRESHOLD_DB) {
-        console.error(`[VAD] 🛑 BARGE-IN: Usuario irrumpió (${dbLevel.toFixed(1)}dB). Limpiando buffer de salida...`);
+      if (isGeminiSpeaking && dbLevel > BARGE_IN_THRESHOLD_DB && !isBargeInCooldown) {
+        console.error(`[VAD] 🛑 BARGE-IN: Usuario irrumpió (${dbLevel.toFixed(1)}dB). Cortando stream de Google...`);
+        isBargeInCooldown = true; // Bloquea los paquetes residuales de Google
         if (activeBrowserConnection) {
           activeBrowserConnection.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
         }
@@ -310,8 +312,9 @@ function startGeminiSession() {
 
     // Interrupción detectada por el propio Gemini
     if (response.serverContent?.interrupted) {
-      console.error('[Gemini] 🛑 Gemini detectó interrupción. Limpiando buffer...');
+      console.error('[Gemini] 🛑 Gemini aceptó la interrupción. Limpiando buffer...');
       isGeminiSpeaking = false;
+      isBargeInCooldown = false;
       activeBrowserConnection?.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
     }
 
@@ -319,7 +322,11 @@ function startGeminiSession() {
     if (response.serverContent?.modelTurn?.parts) {
       for (const part of response.serverContent.modelTurn.parts) {
         if (part.inlineData && activeBrowserConnection) {
-          isGeminiSpeaking = true; // Marcar que Gemini está hablando
+          if (isBargeInCooldown) {
+            // Drop silencioso: Ignorar los trazos de voz que llegaron tarde
+            continue;
+          }
+          isGeminiSpeaking = true; 
           activeBrowserConnection.send(JSON.stringify({ type: 'AUDIO_CHUNK', data: part.inlineData.data }));
         }
       }
@@ -328,6 +335,7 @@ function startGeminiSession() {
     // Turno completo → Gemini dejó de hablar
     if (response.serverContent?.turnComplete) {
       isGeminiSpeaking = false;
+      isBargeInCooldown = false;
     }
 
     // Tool Calling
