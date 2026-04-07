@@ -77,11 +77,22 @@ function draw() {
   ctx.fillText(`${db.toFixed(1)} dB`, 20, 40);
 }
 
-// Escuchar para colgar
+// Escuchar para colgar o loguear
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'STOP_AUDIO') {
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         window.close();
+    } else if (msg.type === 'RELAY_LOG') {
+        const terminal = document.getElementById('terminal');
+        if (terminal) {
+            const p = document.createElement('p');
+            p.innerText = msg.message;
+            if (msg.message.includes('ANOMALÍA')) p.style.color = '#f87171';
+            else if (msg.message.includes('BARGE-IN')) p.style.color = '#fbbf24';
+            terminal.appendChild(p);
+            terminal.scrollTop = terminal.scrollHeight;
+            if (terminal.childElementCount > 50) terminal.removeChild(terminal.firstChild);
+        }
     }
 });
 
