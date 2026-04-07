@@ -45,19 +45,20 @@ wss.on('connection', (ws) => {
         stopGeminiSession();
       }
     } catch (e) {
-      // SOLO ENVIAR AUDIO SI GEMINI YA DIJO "SETUP COMPLETE"
+      // ELIMINACIÓN DEFINITIVA DE MEDIA_CHUNKS (MODO 2026)
       if (geminiWs && geminiWs.readyState === WebSocket.OPEN && isGeminiReady) {
         const base64Data = data.toString('base64');
         const audioPayload = {
-          realtime_input: {
-            media_chunks: [
-              {
-                data: base64Data,
-                mime_type: "audio/pcm;rate=16000"
-              }
-            ]
+          realtimeInput: {
+            audio: {
+              data: base64Data,
+              mimeType: "audio/pcm;rate=16000"
+            }
           }
         };
+        // Log para saber exactamente cuándo sale el primer chunk
+        // (Usamos slice para no ensuciar la consola con base64 gigante)
+        console.error(`[Relay] 📤 Enviando chunk de AUDIO a Gemini (Payload: ${JSON.stringify(audioPayload).slice(0, 70)}...)`);
         geminiWs.send(JSON.stringify(audioPayload));
       }
     }
@@ -114,20 +115,23 @@ function startGeminiSession() {
     console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 150) + '...');
     
     if (response.setup_complete || response.setupComplete) {
-        console.error('[Gemini] ✅ SETUP COMPLETADO con éxito');
+        console.error('[Gemini] ✅ SETUP COMPLETADO con éxito. (Semáforo Abierto, esperando audio...)');
         isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
+        
+        /* COMENTAMOS EL TEXTO INICIAL POR AHORA PARA AISLAR EL ERROR
         geminiWs.send(JSON.stringify({
-          client_content: {
+          clientContent: {
             turns: [{ role: "user", parts: [{ text: "Hola. Preséntate de forma corta." }] }],
-            turn_complete: true
+            turnComplete: true
           }
         }));
+        */
     }
 
-    if (response.server_content?.model_turn?.parts) {
-      for (const part of response.server_content.model_turn.parts) {
-        if (part.inline_data && activeBrowserConnection) {
-          activeBrowserConnection.send(JSON.stringify({ type: 'AUDIO_CHUNK', data: part.inline_data.data }));
+    if (response.serverContent?.modelTurn?.parts) {
+      for (const part of response.serverContent.modelTurn.parts) {
+        if (part.inlineData && activeBrowserConnection) {
+          activeBrowserConnection.send(JSON.stringify({ type: 'AUDIO_CHUNK', data: part.inlineData.data }));
         }
       }
     }
