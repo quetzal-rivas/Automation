@@ -59,7 +59,7 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log('[Background] Iniciando sesión por petición del Popup');
     callStatus = 'CONNECTING';
     await startOffscreenAudio();
-    chrome.runtime.sendMessage({ type: 'PLAY_RING' });
+    // El trino fue silenciado. Iniciamos en modo Pasivo de Escucha Directa.
 
     // ESTO FALTABA: Avisar al Relay que despierte a Gemini
     if (socket && socket.readyState === WebSocket.OPEN) {
