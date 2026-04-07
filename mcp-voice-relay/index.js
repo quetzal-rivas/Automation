@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
+import http from 'http';
 
 dotenv.config();
 
@@ -428,6 +429,23 @@ async function apiRequest(method, reqPath, body = null) {
   });
   return response.json();
 }
+
+// ─────────────────────────────────────────────────────────
+// BUCLE DE PRUEBAS AGENTE (HTTP Local)
+// ─────────────────────────────────────────────────────────
+const adminServer = http.createServer((req, res) => {
+  if (req.url === '/trigger-call' && req.method === 'POST') {
+    if (activeBrowserConnection) {
+      activeBrowserConnection.send(JSON.stringify({ type: 'INCOMING_CALL' }));
+      res.writeHead(200); res.end('Llamando a extension...');
+    } else {
+      res.writeHead(400); res.end('No hay extension conectada.');
+    }
+  } else {
+    res.writeHead(404); res.end('Not found');
+  }
+});
+adminServer.listen(8082, () => console.error('[Standby] Adming HTTP endpoint vivo en 8082'));
 
 // ─────────────────────────────────────────────────────────
 // SERVIDOR MCP (IDE Tools)
