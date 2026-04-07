@@ -60,6 +60,13 @@ chrome.runtime.onMessage.addListener((msg) => {
     playRingTone();
   } else if (msg.type === 'STOP_RING') {
     stopRingTone();
+  } else if (msg.type === 'CLEAR_AUDIO_QUEUE') { // 🛑 CORTA EL AUDIO AL INSTANTE
+    if (audioContext) {
+      audioContext.close();
+      audioContext = null;
+    }
+    nextStartTime = 0;
+    console.log('[Offscreen] 💥 Audio abortado por interrupción del usuario');
   } else if (msg.type === 'STOP_AUDIO') {
     stopRingTone();
     if (audioContext) audioContext.close();

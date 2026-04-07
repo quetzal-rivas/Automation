@@ -128,6 +128,13 @@ function startGeminiSession() {
         */
     }
 
+    if (response.serverContent?.interrupted) {
+        console.error('[Gemini] 🛑 INTERRUPCIÓN DETECTADA (Barge-in). Vaciando buffer...');
+        if (activeBrowserConnection) {
+            activeBrowserConnection.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
+        }
+    }
+
     if (response.serverContent?.modelTurn?.parts) {
       for (const part of response.serverContent.modelTurn.parts) {
         if (part.inlineData && activeBrowserConnection) {
