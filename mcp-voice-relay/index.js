@@ -39,6 +39,20 @@ let isGeminiReady = false;
 let isGeminiSpeaking = false; // TRUE mientras Gemini genera audio de salida
 let isPassiveMode = false;   // TRUE en modo "Escucha de Bajo Consumo"
 let lastBrowserActivity = Date.now();
+let sessionStartTime = null;
+
+// ─────────────────────────────────────────────────────────
+// CRONÓMETRO GLOBAL DE LOGS (Telemetry)
+// ─────────────────────────────────────────────────────────
+const originalConsoleError = console.error;
+console.error = function (...args) {
+  if (!sessionStartTime) {
+    originalConsoleError('[Standby]', ...args);
+  } else {
+    const elapsed = ((Date.now() - sessionStartTime) / 1000).toFixed(2);
+    originalConsoleError(`[T+${elapsed}s]`, ...args);
+  }
+};
 
 // ─────────────────────────────────────────────────────────
 // MOTOR DE ENERGÍA (UTILIDAD POR PROCESO)
@@ -103,11 +117,24 @@ function classifyAnomalyScenario(preBuffer, postBufferDb) {
 /**
  * Envía el análisis de anomalía a Gemini con los metadatos del escenario.
  */
-function dispatchAnomalyToGemini(scenario, preBufferB64) {
+function dispatchAnomalyToGemini(scenario, preBufferDb, allChunksSnapshot) {
   if (!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
   
   console.error(`[VAD] 🚨 ANOMALÍA CAPTURADA LOCALMENTE (Escenario: ${scenario})`);
   
+  // 1. DUMP DE CAJA NEGRA (La memoria acústica del Edge)
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `anomalia_${scenario}_${timestamp}.raw`;
+    const filepath = path.join('/Users/aztecgod/Active-Projects/Automation', filename);
+    const audioBuffers = allChunksSnapshot.map(chunk => Buffer.from(chunk.base64, 'base64'));
+    const finalBuffer = Buffer.concat(audioBuffers);
+    fs.writeFile(filepath, finalBuffer, { encoding: 'binary' });
+    console.error(`[Caja Negra] 💾 Archivo guardado con éxito: ${filename}`);
+  } catch (err) {
+    console.error('[Caja Negra] Error guardando archivo raw:', err);
+  }
+
   // Limpiamos la cola de audio en el navegador
   if (activeBrowserConnection) {
     activeBrowserConnection.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
@@ -142,6 +169,7 @@ wss.on('connection', (ws) => {
         return;
       }
       if (msg.type === 'VOICE_START' || msg.type === 'VOICE_ANSWER') {
+        sessionStartTime = Date.now(); // ⏱️ INICIA EL CRONÓMETRO DE PRECISIÓN DE LA LLAMADA
         console.error(`[Relay] 🚀 Comando de inicio (${msg.type}). Iniciando sesión Gemini...`);
         isPassiveMode = false;
         startGeminiSession();
@@ -164,14 +192,15 @@ wss.on('connection', (ws) => {
       
       if ((isAbsoluteAnomaly || isDeltaAnomaly) && !anomalyDetectionTimeout) {
         console.error(`[VAD] 🚨 ANOMALÍA DETECTADA: ${dbLevel.toFixed(1)}dB (delta: ${(dbLevel - lastDbLevel).toFixed(1)}dB)`);
-        anomalyPreBuffer = [...ringBuffer.map(c => c.db)]; // Snapshot del buffer pre-evento
+        anomalyPreBuffer = [...ringBuffer.map(c => c.db)]; // Snapshot de base algorítmica
         
-        // Esperar 5s para capturar contexto post-evento
+        // Esperar 5s para el procesamiento de "Caja Negra" (post-contexto)
         anomalyPostChunksRemaining = POST_ANOMALY_CHUNKS;
         anomalyDetectionTimeout = setTimeout(() => {
           const postAvgDb = ringBuffer.slice(-POST_ANOMALY_CHUNKS).reduce((a, c) => a + c.db, 0) / POST_ANOMALY_CHUNKS;
           const scenario = classifyAnomalyScenario(anomalyPreBuffer, postAvgDb);
-          dispatchAnomalyToGemini(scenario, null);
+          const fullContextSnapshot = [...ringBuffer]; // Copia de seguridad de todo el audio pre + post!
+          dispatchAnomalyToGemini(scenario, anomalyPreBuffer, fullContextSnapshot);
           anomalyDetectionTimeout = null;
           anomalyPreBuffer = null;
         }, 5000);
@@ -242,6 +271,15 @@ function startGeminiSession() {
                 type: "object",
                 properties: { instruction: { type: "string", description: "La instrucción de código a ejecutar." } },
                 required: ["instruction"]
+              }
+            },
+            {
+              name: "update_whisper_cortex",
+              description: "Añade una deducción, memoria de conversación o pivote técnico al Memory Córtex persistente (.whisper_context.md).",
+              parameters: {
+                type: "object",
+                properties: { memory_entry: { type: "string", description: "El recuerdo a escribir en la bitácora." } },
+                required: ["memory_entry"]
               }
             },
             {
@@ -334,6 +372,14 @@ async function handleToolCall(call) {
     await fs.writeFile(directivePath, content);
     console.error(`[Tool] ✅ Directiva escrita en ${directivePath}`);
     return "Directiva enviada al agente.";
+  }
+
+  if (call.name === 'update_whisper_cortex') {
+    const cortexPath = path.join(root, '.whisper_context.md');
+    const memory = `\n---\n**Hora:** ${new Date().toISOString()}\n**Memoria:** ${call.args.memory_entry}\n`;
+    await fs.appendFile(cortexPath, memory);
+    console.error(`[Tool] 🧠 Nueva memoria neuronal insertada.`);
+    return "Córtex actualizado satisfactoriamente.";
   }
 
   if (call.name === 'set_passive_mode') {
