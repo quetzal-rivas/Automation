@@ -123,24 +123,53 @@ function classifyAnomalyScenario(preBuffer, postBufferDb) {
 }
 
 /**
+ * Agrega cabecera WAV estándar a los datos PCM raw de 16kHz Mono 16-bit
+ */
+function createWavHeader(dataLength) {
+  const buffer = Buffer.alloc(44);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataLength, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16); // Subchunk1Size (16 for PCM)
+  buffer.writeUInt16LE(1, 20);  // AudioFormat (1 for PCM)
+  buffer.writeUInt16LE(1, 22);  // NumChannels (1 mono)
+  buffer.writeUInt32LE(16000, 24); // SampleRate (16 kHz)
+  buffer.writeUInt32LE(32000, 28); // ByteRate (16000 * 1 * 16/8)
+  buffer.writeUInt16LE(2, 32);  // BlockAlign
+  buffer.writeUInt16LE(16, 34); // BitsPerSample
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataLength, 40);
+  return buffer;
+}
+
+/**
  * Envía el análisis de anomalía a Gemini con los metadatos del escenario.
  */
-function dispatchAnomalyToGemini(scenario, preBufferDb, allChunksSnapshot) {
+async function dispatchAnomalyToGemini(scenario, preBufferDb, allChunksSnapshot) {
   if (!geminiWs || geminiWs.readyState !== WebSocket.OPEN) return;
   
   console.error(`[VAD] 🚨 ANOMALÍA CAPTURADA LOCALMENTE (Escenario: ${scenario})`);
   
-  // 1. DUMP DE CAJA NEGRA (La memoria acústica del Edge)
+  // 1. DUMP DE CAJA NEGRA (La memoria acústica del Edge en WAV)
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `anomalia_${scenario}_${timestamp}.raw`;
-    const filepath = path.join('/Users/aztecgod/Active-Projects/Automation', filename);
+    const filename = `anomalia_${scenario}_${timestamp}.wav`;
+    const targetDir = path.join('/Users/aztecgod/Active-Projects/Automation', 'blackbox_audio');
+    
+    await fs.mkdir(targetDir, { recursive: true });
+    
+    const filepath = path.join(targetDir, filename);
     const audioBuffers = allChunksSnapshot.map(chunk => Buffer.from(chunk.base64, 'base64'));
-    const finalBuffer = Buffer.concat(audioBuffers);
-    fs.writeFile(filepath, finalBuffer, { encoding: 'binary' });
-    console.error(`[Caja Negra] 💾 Archivo guardado con éxito: ${filename}`);
+    const pcmData = Buffer.concat(audioBuffers);
+    
+    const wavHeader = createWavHeader(pcmData.length);
+    const finalWavBuffer = Buffer.concat([wavHeader, pcmData]);
+    
+    await fs.writeFile(filepath, finalWavBuffer, { encoding: 'binary' });
+    console.error(`[Caja Negra] 💾 Archivo guardado: blackbox_audio/${filename}`);
   } catch (err) {
-    console.error('[Caja Negra] Error guardando archivo raw:', err);
+    console.error('[Caja Negra] Error guardando archivo WAV:', err);
   }
 
   // Limpiamos la cola de audio en el navegador
