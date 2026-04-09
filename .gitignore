@@ -4,3 +4,6 @@ npm-debug.log*
 
 .env/
 .vscode/
+.env
+.env.local
+mcp-voice-relay/.env
