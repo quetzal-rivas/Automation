@@ -4,7 +4,7 @@ let ringInterval = null;
 
 function initAudioContext() {
   if (!audioContext) {
-    audioContext = new AudioContext({ sampleRate: 16000 });
+    audioContext = new AudioContext({ sampleRate: 24000 });
   }
 }
 
@@ -42,7 +42,7 @@ function playPcmChunk(base64Data) {
   const float32 = new Float32Array(pcm16.length);
   for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 0x8000;
   
-  const buffer = audioContext.createBuffer(1, float32.length, 16000);
+  const buffer = audioContext.createBuffer(1, float32.length, 24000);
   buffer.getChannelData(0).set(float32);
   const source = audioContext.createBufferSource();
   source.buffer = buffer;

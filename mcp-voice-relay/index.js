@@ -90,7 +90,16 @@ function startGeminiSession() {
     const setupMsg = {
       setup: {
         model: "models/gemini-3.1-flash-live-preview", // ¡El último grito de Marzo 2026!
-        generation_config: { response_modalities: ["audio"] },
+        generation_config: { 
+          response_modalities: ["audio"],
+          speech_config: {
+            voice_config: {
+              prebuilt_voice_config: {
+                voice_name: "Aoede" 
+              }
+            }
+          }
+        },
         tools: [{
           function_declarations: [{
             name: "send_directive",
