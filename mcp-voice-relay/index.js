@@ -167,14 +167,19 @@ function startGeminiSession() {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito. (Semáforo Abierto, esperando audio...)');
         isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
         
-        /* COMENTAMOS EL TEXTO INICIAL POR AHORA PARA AISLAR EL ERROR
-        geminiWs.send(JSON.stringify({
-          clientContent: {
-            turns: [{ role: "user", parts: [{ text: "Hola. Preséntate de forma corta." }] }],
-            turnComplete: true
-          }
-        }));
-        */
+        // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
+        try {
+            const root = '/Users/aztecgod/Active-Projects/Automation';
+            const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+            if (mdContent.includes('# IDE Response')) {
+                geminiWs.send(JSON.stringify({
+                  clientContent: {
+                    turns: [{ role: "user", parts: [{ text: "NOTA DE SISTEMA INVISIBLE (No leas la nota literalmente, actúa natural): El Agente IDE acaba de reportar lo siguiente en el archivo local, lee amigablemente el reporte al usuario: \n\n" + mdContent }] }],
+                    turnComplete: true
+                  }
+                }));
+            }
+        } catch(e) { }
     }
 
     if (response.serverContent?.modelTurn?.parts) {
@@ -253,26 +258,9 @@ async function handleToolCall(call) {
     const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${timestamp}\n`;
     await fs.writeFile(directivePath, content);
     
-    // MAGIA NEGRA: En lugar de retornar al instante, esperamos hasta 30 segundos
-    // a que el IDE sobrescriba este archivo con su respuesta.
-    return new Promise((resolve) => {
-        let loopCount = 0;
-        const watchInterval = setInterval(async () => {
-            loopCount++;
-            try {
-                const currentData = await fs.readFile(directivePath, 'utf8');
-                if (currentData !== content) {
-                    clearInterval(watchInterval);
-                    resolve("Respuesta lista del IDE: " + currentData);
-                }
-            } catch(e) {}
-            
-            if (loopCount >= 25) { // 25 segundos máximo
-                clearInterval(watchInterval);
-                resolve("El IDE tomó demasiado tiempo en responder pero la tarea está en progreso.");
-            }
-        }, 1000);
-    });
+    // FLUJO STATELESS: Regresamos AL INSTANTE para que Gemini procese la despedida
+    // y llamamos a colgarLlamada, lo que suspende la conexión y deja al UI en 'Processing'
+    return "Directiva enviada. Despídete muy brevemente diciendo que te pones a trabajar y llama inmediatamente a colgarLlamada.";
   } else if (call.name === 'colgarLlamada') {
     console.error('[Gemini] ☎️  Colgando llamada y mandando orden de cerrar pestaña...');
     if (activeBrowserConnection) {
@@ -310,7 +298,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   switch (name) {
     case "report_result": {
-      if (activeBrowserConnection?.readyState === 1) {
+      // Si la sesión de Gemini sigue abierta, le inyectamos la respuesta directo al oído.
+      if (geminiWs) {
+        geminiWs.send(JSON.stringify({
+          clientContent: {
+            turns: [{ role: "user", parts: [{ text: "NOTA DE SISTEMA [ANTIGRAVITY TERMINÓ UNA TAREA LENTA EN SEGUNDO PLANO]: " + args.result }] }],
+            turnComplete: true
+          }
+        }));
+      } else if (activeBrowserConnection?.readyState === 1) {
+        // Solo despertamos la UI si de plano Gemini estaba apagado
         activeBrowserConnection.send(JSON.stringify({ type: 'TASK_COMPLETED', result: args.result }));
       }
       return { content: [{ type: "text", text: "OK" }] };

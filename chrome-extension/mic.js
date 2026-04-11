@@ -5,6 +5,8 @@ let bufferLength;
 let dataArray;
 let canvas = document.getElementById('canvas');
 let ctx = canvas.getContext('2d');
+let isPaused = false;
+let drawAnimationId;
 
 async function startMic() {
   try {
@@ -45,7 +47,8 @@ async function startMic() {
 }
 
 function draw() {
-  requestAnimationFrame(draw);
+  drawAnimationId = requestAnimationFrame(draw);
+  if (!analyser) return;
   analyser.getByteFrequencyData(dataArray);
 
   ctx.fillStyle = '#020617';
@@ -57,17 +60,39 @@ function draw() {
 
   for(let i = 0; i < bufferLength; i++) {
     barHeight = dataArray[i] / 2;
-    ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`;
+    // Si estamos en modo PROCESSING, dibujamos una onda fantasmal plana o grisácea 
+    if (isPaused) {
+        barHeight = (Math.sin(Date.now() / 500 + i) * 10) + 15; // Animación 'breathe' falsa
+        ctx.fillStyle = `rgb(80, 80, 90)`;
+    } else {
+        ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`;
+    }
+    
     ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
     x += barWidth + 1;
   }
 }
 
-// Escuchar para colgar
-chrome.runtime.onMessage.addListener((msg) => {
+// Escuchar para eventos de control de Mic y UI Stateless
+chrome.runtime.onMessage.addListener(async (msg) => {
     if (msg.type === 'STOP_AUDIO') {
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         window.close();
+    } else if (msg.type === 'PAUSE_MIC') {
+        console.log('[Motor Mic] Pausando Hardware...');
+        isPaused = true;
+        if (micStream) micStream.getTracks().forEach(t => t.stop());
+        document.querySelector('.label').innerText = "Antigravity Procesando...";
+        document.querySelector('.mic-icon').style.animation = "none";
+        document.querySelector('.mic-icon').style.borderColor = "#475569";
+        document.querySelector('.mic-icon').style.boxShadow = "none";
+    } else if (msg.type === 'RESUME_MIC') {
+        console.log('[Motor Mic] Reanudando Hardware!');
+        isPaused = false;
+        document.querySelector('.label').innerText = "Gemini Live activo";
+        document.querySelector('.mic-icon').style.animation = "breathe 3s infinite";
+        document.querySelector('.mic-icon').style.borderColor = "#a855f7";
+        await startMic();
     }
 });
 

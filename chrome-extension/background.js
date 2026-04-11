@@ -15,10 +15,10 @@ function connectToRelay() {
     console.log(`[Background] Mensaje de Relay: ${data.type}`);
     
     if (data.type === 'END_CALL') {
-      console.log('[Background] Relay solicitó finalizar llamada. Cerrando UI...');
-      callStatus = 'DISCONNECTED';
-      chrome.runtime.sendMessage({ type: 'STOP_AUDIO' });
-      chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'DISCONNECTED' });
+      console.log('[Background] Relay solicita pausa (Stateless Mode). Suspendiendo UI...');
+      callStatus = 'PROCESSING';
+      chrome.runtime.sendMessage({ type: 'PAUSE_MIC' });
+      chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'PROCESSING' });
     } else if (data.type === 'INCOMING_CALL' || data.type === 'TASK_COMPLETED') {
       showCallOverlay(data);
     } else if (data.type === 'AUDIO_CHUNK') {
@@ -51,13 +51,22 @@ async function showCallOverlay(data) {
   // Opcional: asegurarnos de que el offscreen module esté activo para el audio fallback si hace falta
   await startOffscreenAudio();
   
-  // Abrimos la hermosa pantalla con las ondas como una pestaña normal
-  chrome.tabs.create({
-    url: 'mic.html',
-    active: true
-  });
+  // SOLUCIÓN DE TABS DUPLICADAS
+  const extensionUrl = chrome.runtime.getURL('mic.html');
+  const tabs = await chrome.tabs.query({});
+  const existingTab = tabs.find(t => t.url && t.url.startsWith(extensionUrl));
+  
+  if (existingTab) {
+      console.log('[Background] Pestaña mic.html ya existe, enfocándola y reanudando MIC...');
+      await chrome.tabs.update(existingTab.id, { active: true });
+      await chrome.windows.update(existingTab.windowId, { focused: true });
+      chrome.runtime.sendMessage({ type: 'RESUME_MIC' });
+  } else {
+      console.log('[Background] Creando nueva pestaña de mic.html...');
+      chrome.tabs.create({ url: 'mic.html', active: true });
+  }
 
-  // Autoconestar la llamada de inmediato (Auto-Answer) para iniciar Gemini
+  // Autocontestar la llamada de inmediato (Auto-Answer) para iniciar Gemini
   callStatus = 'CONNECTING';
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'VOICE_START' }));
