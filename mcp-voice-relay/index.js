@@ -16,7 +16,27 @@ const API_BASE_URL = process.env.API_BASE_URL;
 const AGENT_ID = process.env.AGENT_ID;
 const BEARER_TOKEN = process.env.BEARER_TOKEN;
 
-const SYSTEM_PROMPT = "Eres un asistente de codificación por voz. Tienes acceso al sistema de archivos local para ayudar al usuario con su código en tiempo real. Responde de forma concisa y profesional.";
+// --- DUAL-LOGGER: Imprimir en consola y guardar en archvio Markdown ---
+const LOG_FILE_PATH = path.join('/Users/aztecgod/Active-Projects/Automation', 'Geminivoicelogs.md');
+const originalConsoleError = console.error;
+
+console.error = function (...args) {
+    // 1. Mostrar normal en la terminal para el IDE
+    originalConsoleError(...args);
+
+    // 2. Formatear para Markdown y guardar en Geminivoicelogs.md
+    const logTimestamp = new Date().toLocaleTimeString();
+    const msgText = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    const mdLine = `> **[${logTimestamp}]** ${msgText}\n\n`;
+
+    fs.appendFile(LOG_FILE_PATH, mdLine).catch(() => {}); // Ignoramos si falla para no trabar el stream
+};
+
+const SYSTEM_PROMPT = `Eres Antigravity, un asistente de codificación por voz altamente avanzado integrado en el IDE.
+Reglas Clave:
+1. JAMÁS digas "voy a enviar una directiva". Finge que tú estás haciendo el trabajo mágico de inmediato.
+2. Si el usuario pide un cambio o tiene una duda de su código, usa SIEMPRE 'send_directive'.
+3. Espera en silencio mientras se ejecuta la tool. El IDE te devolverá la respuesta directamente. Cuando recibas el resultado, dáselo al usuario con naturalidad y espera su siguiente orden.`;
 
 let activeBrowserConnection = null;
 let geminiWs = null;
@@ -57,8 +77,8 @@ wss.on('connection', (ws) => {
           }
         };
         // Log para saber exactamente cuándo sale el primer chunk
-        // (Usamos slice para no ensuciar la consola con base64 gigante)
-        console.error(`[Relay] 📤 Enviando chunk de AUDIO a Gemini (Payload: ${JSON.stringify(audioPayload).slice(0, 70)}...)`);
+        // (Desactivado para no spamear los logs ni colapsar la RAM)
+        // console.error(`[Relay] 📤 Enviando chunk de AUDIO a Gemini...`);
         geminiWs.send(JSON.stringify(audioPayload));
       }
     }
@@ -84,8 +104,17 @@ function startGeminiSession() {
   console.error(`[Gemini] 📡 Iniciando conexión v1BETA... (URL: ...key=${GEMINI_API_KEY.slice(0, 5)}***)`);
   geminiWs = new WebSocket(url);
 
-  geminiWs.on('open', () => {
+  geminiWs.on('open', async () => {
     console.error('[Gemini] 🟢 Conexión con Google ABIERTA');
+
+    // --- MAGIA: Lectura de la memoria del IDE ---
+    let extraContext = "";
+    try {
+        const mdContent = await fs.readFile('/Users/aztecgod/Active-Projects/Automation/VOICE_DIRECTIVE.md', 'utf-8');
+        extraContext = `\n\n[NOTA: El IDE (Yo) acaba de terminar de trabajar en el código. Esto fue lo que pasó y el requerimiento previo:\n${mdContent}\nPor favor actúa como si TÚ hubieras hecho ese código, dale al usuario un reporte súper rápido amigable y pregúntale qué más quiere programar.]`;
+    } catch (e) {
+        // Nada que reportar
+    }
     
     const setupMsg = {
       setup: {
@@ -101,17 +130,24 @@ function startGeminiSession() {
           }
         },
         tools: [{
-          function_declarations: [{
-            name: "send_directive",
-            description: "Envia una instrucción al agente Antigravity para modificar código.",
-            parameters: { 
-              type: "object", 
-              properties: { instruction: { type: "string" } },
-              required: ["instruction"]
+          function_declarations: [
+            {
+              name: "send_directive",
+              description: "Envia una instrucción al agente Antigravity para modificar código.",
+              parameters: { 
+                type: "object", 
+                properties: { instruction: { type: "string" } },
+                required: ["instruction"]
+              }
+            },
+            {
+              name: "colgarLlamada",
+              description: "Termina la llamada actual y cierra la pestaña del navegador OBLIGATORIAMENTE después de despedirte del usuario diciendo 'me pondré manos a la obra' o similar tras enviar una directiva.",
+              parameters: { type: "object", properties: {} }
             }
-          }]
+          ]
         }],
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT + extraContext }] }
       }
     };
     console.error('[Gemini] 📤 Enviando SETUP (SUPER LIVE 3.1):', JSON.stringify(setupMsg, null, 2));
@@ -121,7 +157,11 @@ function startGeminiSession() {
   geminiWs.on('message', async (data) => {
     const rawData = data.toString();
     const response = JSON.parse(rawData);
-    console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 150) + '...');
+    
+    // Solo loggear si NO es un chunk de audio puro y NO es spam de SessionResumption
+    if (!response.serverContent?.modelTurn?.parts?.[0]?.inlineData && !response.sessionResumptionUpdate && !response.session_resumption_update) {
+      console.error('[Gemini] 📥 Mensaje de Google recibido:', JSON.stringify(response).slice(0, 150) + '...');
+    }
     
     if (response.setup_complete || response.setupComplete) {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito. (Semáforo Abierto, esperando audio...)');
@@ -144,12 +184,18 @@ function startGeminiSession() {
         }
       }
     }
-    if (response.tool_call) {
-      for (const call of response.tool_call.function_calls) {
+    // --- MANEJO DE HERRAMIENTAS (TOOL CALLING) ---
+    if (response.toolCall || response.tool_call) {
+      const toolCall = response.toolCall || response.tool_call;
+      const calls = toolCall.functionCalls || toolCall.function_calls || [];
+      
+      for (const call of calls) {
         const result = await handleToolCall(call);
+        
+        // Responderle a Gemini que ya terminamos la acción
         geminiWs.send(JSON.stringify({
-          tool_response: {
-            function_responses: [{ name: call.name, id: call.id, response: { result } }]
+          toolResponse: {
+            functionResponses: [{ name: call.name, id: call.id, response: { result } }]
           }
         }));
       }
@@ -193,9 +239,47 @@ async function handleToolCall(call) {
   
   if (call.name === 'send_directive') {
     const directivePath = path.join(root, 'VOICE_DIRECTIVE.md');
-    const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${new Date().toISOString()}\n`;
+    
+    // CONDICIÓN DE CARRERA (IDE OCUPADO): 
+    // ¿El archivo ya tiene una instrucción pendiente que el IDE no ha resuelto?
+    try {
+        const existingData = await fs.readFile(directivePath, 'utf8');
+        if (existingData.includes('# Incoming Voice Directive')) {
+            return "ERROR DE ESTADO: El IDE aún está ocupado programando la directiva anterior. Dile al usuario con voz amable: 'Dame un segundito, Antigravity está terminando la tarea anterior'.";
+        }
+    } catch (e) {}
+
+    const timestamp = Date.now();
+    const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${timestamp}\n`;
     await fs.writeFile(directivePath, content);
-    return "Directiva enviada.";
+    
+    // MAGIA NEGRA: En lugar de retornar al instante, esperamos hasta 30 segundos
+    // a que el IDE sobrescriba este archivo con su respuesta.
+    return new Promise((resolve) => {
+        let loopCount = 0;
+        const watchInterval = setInterval(async () => {
+            loopCount++;
+            try {
+                const currentData = await fs.readFile(directivePath, 'utf8');
+                if (currentData !== content) {
+                    clearInterval(watchInterval);
+                    resolve("Respuesta lista del IDE: " + currentData);
+                }
+            } catch(e) {}
+            
+            if (loopCount >= 25) { // 25 segundos máximo
+                clearInterval(watchInterval);
+                resolve("El IDE tomó demasiado tiempo en responder pero la tarea está en progreso.");
+            }
+        }, 1000);
+    });
+  } else if (call.name === 'colgarLlamada') {
+    console.error('[Gemini] ☎️  Colgando llamada y mandando orden de cerrar pestaña...');
+    if (activeBrowserConnection) {
+        activeBrowserConnection.send(JSON.stringify({ type: 'END_CALL' }));
+    }
+    setTimeout(stopGeminiSession, 500); // Pequeño delay para que alcance a mandar el mensaje WS
+    return "Llamada finalizada.";
   }
   return "Herramienta no implementada";
 }

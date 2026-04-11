@@ -14,16 +14,20 @@ function connectToRelay() {
     const data = JSON.parse(event.data);
     console.log(`[Background] Mensaje de Relay: ${data.type}`);
     
-    if (data.type === 'INCOMING_CALL' || data.type === 'TASK_COMPLETED') {
+    if (data.type === 'END_CALL') {
+      console.log('[Background] Relay solicitó finalizar llamada. Cerrando UI...');
+      callStatus = 'DISCONNECTED';
+      chrome.runtime.sendMessage({ type: 'STOP_AUDIO' });
+      chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'DISCONNECTED' });
+    } else if (data.type === 'INCOMING_CALL' || data.type === 'TASK_COMPLETED') {
       showCallOverlay(data);
     } else if (data.type === 'AUDIO_CHUNK') {
       // Si Gemini empieza a hablar, mostramos la burbuja
       if (callStatus === 'CONNECTING') {
-          console.log('[Background] Primer audio recibido. Cambiando a CONNECTED y mostrando burbuja.');
+          console.log('[Background] Primer audio recibido. Cambiando a CONNECTED.');
           callStatus = 'CONNECTED';
           chrome.runtime.sendMessage({ type: 'STATUS_UPDATED', status: 'CONNECTED' });
           chrome.runtime.sendMessage({ type: 'STOP_RING' });
-          showCallOverlay();
       }
       // Reenviar voz de Gemini al Offscreen para reproducirla
       chrome.runtime.sendMessage(data);
@@ -40,14 +44,23 @@ function connectToRelay() {
   }
 }
 
-// Inyectar el overlay visual en la pestaña actual
+// Lanzar la pestaña/ventana del micrófono cuando llama el IDE
 async function showCallOverlay(data) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab && !tab.url.startsWith('chrome://')) {
-    console.log(`[Background] Inyectando overlay en la pestaña: ${tab.id}`);
-    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['overlay.js'] });
-  } else {
-    console.log('[Background] No se puede inyectar overlay en páginas del sistema o pestañas vacías.');
+  console.log('[Background] El IDE está llamando. Abriendo ventana de micrófono...');
+  
+  // Opcional: asegurarnos de que el offscreen module esté activo para el audio fallback si hace falta
+  await startOffscreenAudio();
+  
+  // Abrimos la hermosa pantalla con las ondas como una pestaña normal
+  chrome.tabs.create({
+    url: 'mic.html',
+    active: true
+  });
+
+  // Autoconestar la llamada de inmediato (Auto-Answer) para iniciar Gemini
+  callStatus = 'CONNECTING';
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'VOICE_START' }));
   }
 }
 
