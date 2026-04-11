@@ -49,7 +49,7 @@ La contraseña extraída es "Hello World" y se ha vinculado al secreto `API_KEY`
 
 ### Step 5: Notify the Extension
 Even though Gemini might be polling, you must actively notify the UI that the work is finished.
-Use the MCP tool `report_result` or `trigger_browser_call` (whichever is requested/available) so the voice agent knows to speak your response to the user.
+Use the MCP tool `trigger_browser_call` so the voice agent knows to speak your response to the user.
 
 ### Step 6: Recurse (Restart the Loop)
 This is an infinite loop. As soon as Step 5 is done, **YOU MUST IMMEDIATELY GO BACK TO STEP 1** within the same or next output block. Call the background bash script again and wait. Never drop out of the loop unless explicitly commanded by the user.

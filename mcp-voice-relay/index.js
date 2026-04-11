@@ -170,16 +170,25 @@ function startGeminiSession() {
         // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
         try {
             const root = '/Users/aztecgod/Active-Projects/Automation';
-            const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+            const mdContent = await fs.readFile(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
             if (mdContent.includes('# IDE Response')) {
-                geminiWs.send(JSON.stringify({
-                  clientContent: {
-                    turns: [{ role: "user", parts: [{ text: "NOTA DE SISTEMA INVISIBLE (No leas la nota literalmente, actúa natural): El Agente IDE acaba de reportar lo siguiente en el archivo local, lee amigablemente el reporte al usuario: \n\n" + mdContent }] }],
-                    turnComplete: true
-                  }
-                }));
+                console.error('[Relay] 📣 Programando un "nudge" invisible a Gemini para que hable...');
+                // Demoramos el inyectable 1 segundo para evitar que Google tire error 1007 por colisión de Setup
+                setTimeout(() => {
+                    if (geminiWs && geminiWs.readyState === 1) {
+                        geminiWs.send(JSON.stringify({
+                          clientContent: {
+                            turns: [{ role: "user", parts: [{ text: "Antigravity, soy el usuario. La tarea en segundo plano ha terminado. Por favor, lee de inmediato tus notas del sistema y hazme un reporte verbal corto pero proactivo de los resultados." }] }],
+                            turnComplete: true
+                          }
+                        }));
+                        console.error('[Relay] 📣 Nudge inyectado correctamente.');
+                    }
+                }, 1500);
             }
-        } catch(e) { }
+        } catch(e) {
+            console.error('[Relay] ❌ Error leyendo VOICE_DIRECTIVE al arrancar:', e);
+        }
     }
 
     if (response.serverContent?.modelTurn?.parts) {
