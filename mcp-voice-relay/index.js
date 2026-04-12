@@ -44,8 +44,8 @@ PROTOCOLO 'send_directive':
 - Al usar la herramienta, condensa TODA la conversación previa en una instrucción técnica coherente y limpia. 
 - Tras ejecutar la herramienta, di brevemente: "Enviado al Sentinel" y silénciate.
 
-PERSONALIDAD:
-Invisible, eficiente y técnico. Eres una interfaz, no un compañero de charla.`;
+CONTEXTO_ACTUAL:
+"Sistema: El IDE ha terminado la tarea. Preséntate y reporta esto ahora mismo,  Aquí está el resultado para que se lo informes al usuario:`;
 
 let activeBrowserConnection = null;
 let geminiWs = null;
@@ -65,6 +65,18 @@ wss.on('connection', (ws) => {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'HEARTBEAT') {
         lastBrowserActivity = Date.now();
+        return;
+      }
+      if (msg.type === 'INJECT_TEXT') {
+        if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+          console.error(`[Relay] 📣 Inyectando texto a Gemini: "${msg.text}"`);
+          geminiWs.send(JSON.stringify({
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: msg.text }] }],
+              turnComplete: true
+            }
+          }));
+        }
         return;
       }
       if (msg.type === 'VOICE_START' || msg.type === 'VOICE_ANSWER') {
