@@ -73,11 +73,28 @@ function monitorPlayback() {
   }, 200);
 }
 
+function playSingleRing() {
+  initAudioContext();
+  const osc1 = audioContext.createOscillator();
+  const osc2 = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  osc1.frequency.setValueAtTime(550, audioContext.currentTime);
+  osc2.frequency.setValueAtTime(650, audioContext.currentTime);
+  osc1.connect(gain); osc2.connect(gain);
+  gain.connect(audioContext.destination);
+  gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+  osc1.start(); osc2.start();
+  osc1.stop(audioContext.currentTime + 0.8); osc2.stop(audioContext.currentTime + 0.8);
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'AUDIO_CHUNK') {
     playPcmChunk(msg.data);
   } else if (msg.type === 'PLAY_RING') {
     playRingTone();
+  } else if (msg.type === 'PLAY_SINGLE_RING') {
+    playSingleRing();
   } else if (msg.type === 'STOP_RING') {
     stopRingTone();
   } else if (msg.type === 'STOP_AUDIO') {

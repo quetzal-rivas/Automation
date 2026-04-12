@@ -9,7 +9,7 @@ let isPaused = false;
 let drawAnimationId;
 let micEnabled = false;
 let lastActiveTime = Date.now();
-const SILENCE_THRESHOLD = 30; // "30 decibels" approx in analyser units
+const SILENCE_THRESHOLD = 15; // Más sensible para que capte mejor tu voz
 const SILENCE_TIMEOUT = 10000; // 10 seconds
 
 async function startMic() {

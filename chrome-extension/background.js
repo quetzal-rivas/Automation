@@ -51,6 +51,7 @@ async function showCallOverlay(data) {
   
   // Opcional: asegurarnos de que el offscreen module esté activo para el audio fallback si hace falta
   await startOffscreenAudio();
+  chrome.runtime.sendMessage({ type: 'PLAY_SINGLE_RING' });
   
   // SOLUCIÓN DE TABS DUPLICADAS
   const extensionUrl = chrome.runtime.getURL('mic.html');

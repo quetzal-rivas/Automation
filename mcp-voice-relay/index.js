@@ -139,19 +139,19 @@ function startGeminiSession() {
     
     const setupMsg = {
       setup: {
-        model: "models/gemini-3.1-flash-live-preview", // ¡El último grito de Marzo 2026!
-        generation_config: { 
-          response_modalities: ["audio"],
-          speech_config: {
-            voice_config: {
-              prebuilt_voice_config: {
-                voice_name: "Aoede" 
+        model: "models/gemini-3.1-flash-live-preview",
+        generationConfig: { 
+          responseModalities: ["audio"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: "Aoede" 
               }
             }
           }
         },
         tools: [{
-          function_declarations: [
+          functionDeclarations: [
             {
               name: "send_directive",
               description: "Envia una instrucción al agente Antigravity para modificar código.",
@@ -168,7 +168,7 @@ function startGeminiSession() {
             }
           ]
         }],
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT + extraContext }] }
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT + extraContext }] }
       }
     };
     console.error('[Gemini] 📤 Enviando SETUP (SUPER LIVE 3.1):', JSON.stringify(setupMsg, null, 2));
@@ -188,20 +188,35 @@ function startGeminiSession() {
         console.error('[Gemini] ✅ SETUP COMPLETADO con éxito. (Semáforo Abierto, esperando audio...)');
         isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
         
-        // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
-        try {
-            const root = '/Users/aztecgod/Active-Projects/Automation';
-            const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
-            if (mdContent.includes('# IDE Response')) {
-                console.error('[Relay] 📣 Inyectando el Nudge del Primer Turno al Modelo...');
-                geminiWs.send(JSON.stringify({
-                  clientContent: {
-                    turns: [{ role: "user", parts: [{ text: "El trabajo ha sido terminado. Infórmale al usuario rápidamente lo que acaba de suceder." }] }],
-                    turnComplete: true
-                  }
-                }));
+        // Magia Stateless: Siempre obligamos a Gemini a decir algo al iniciar (1s delay para estabilidad)
+        setTimeout(async () => {
+            try {
+                const root = '/Users/aztecgod/Active-Projects/Automation';
+                const mdContent = await fs.readFile(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+                let nudgeText = "¡Hola! Estoy listo para escucharte. ¿En qué vamos a trabajar hoy?";
+                
+                if (mdContent.includes('# IDE Response')) {
+                    console.error('[Relay] 📣 Inyectando el Nudge de Tarea Completada...');
+                    nudgeText = "El trabajo ha sido terminado. Informale al usuario amigablemente lo que acaba de suceder.";
+                } else {
+                    console.error('[Relay] 📣 Inyectando Saludo Inicial...');
+                }
+
+                if (geminiWs && geminiWs.readyState === WebSocket.OPEN) {
+                    const payload = {
+                      clientContent: {
+                        turns: [{ parts: [{ text: nudgeText }] }],
+                        turnComplete: true
+                      }
+                    };
+                    console.error('[Relay] 📤 Enviando Nudge Payload Detallado:');
+                    console.error(JSON.stringify(payload, null, 2));
+                    geminiWs.send(JSON.stringify(payload));
+                }
+            } catch(e) { 
+                console.error('[Relay] ❌ Error inyectando nudge:', e.message);
             }
-        } catch(e) { }
+        }, 1000);
     }
 
     if (response.serverContent?.modelTurn?.parts) {
