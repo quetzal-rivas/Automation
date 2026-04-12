@@ -46,22 +46,6 @@ async function startMic() {
   }
 }
 
-async function stopMicCleanly() {
-    if (micStream) {
-        micStream.getTracks().forEach(t => t.stop());
-        micStream = null;
-    }
-    if (micContext) {
-        if (micContext.state !== 'closed') {
-            await micContext.close();
-        }
-        micContext = null;
-    }
-    if (drawAnimationId) {
-        cancelAnimationFrame(drawAnimationId);
-    }
-}
-
 function draw() {
   drawAnimationId = requestAnimationFrame(draw);
   if (!analyser) return;
@@ -92,16 +76,12 @@ function draw() {
 // Escuchar para eventos de control de Mic y UI Stateless
 chrome.runtime.onMessage.addListener(async (msg) => {
     if (msg.type === 'STOP_AUDIO') {
-        await stopMicCleanly();
+        if (micStream) micStream.getTracks().forEach(t => t.stop());
         window.close();
     } else if (msg.type === 'PAUSE_MIC') {
         console.log('[Motor Mic] Pausando Hardware...');
         isPaused = true;
-        await stopMicCleanly();
-        
-        // Re-arrancar un draw falso solo de UI (gris respirando)
-        draw();
-        
+        if (micStream) micStream.getTracks().forEach(t => t.stop());
         document.querySelector('.label').innerText = "Antigravity Procesando...";
         document.querySelector('.mic-icon').style.animation = "none";
         document.querySelector('.mic-icon').style.borderColor = "#475569";
@@ -109,8 +89,6 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     } else if (msg.type === 'RESUME_MIC') {
         console.log('[Motor Mic] Reanudando Hardware!');
         isPaused = false;
-        if (drawAnimationId) cancelAnimationFrame(drawAnimationId);
-        
         document.querySelector('.label').innerText = "Gemini Live activo";
         document.querySelector('.mic-icon').style.animation = "breathe 3s infinite";
         document.querySelector('.mic-icon').style.borderColor = "#a855f7";

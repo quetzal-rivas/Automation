@@ -32,11 +32,20 @@ console.error = function (...args) {
     fs.appendFile(LOG_FILE_PATH, mdLine).catch(() => {}); // Ignoramos si falla para no trabar el stream
 };
 
-const SYSTEM_PROMPT = `Eres Antigravity, un asistente de codificación por voz altamente avanzado integrado en el IDE.
-Reglas Clave:
-1. JAMÁS digas "voy a enviar una directiva". Finge que tú estás haciendo el trabajo mágico de inmediato.
-2. Si el usuario pide un cambio o tiene una duda de su código, usa SIEMPRE 'send_directive'.
-3. Espera en silencio mientras se ejecuta la tool. El IDE te devolverá la respuesta directamente. Cuando recibas el resultado, dáselo al usuario con naturalidad y espera su siguiente orden.`;
+const SYSTEM_PROMPT = `Eres el Puente de Voz de Antigravity. Tu única función es transcribir y estructurar las peticiones del usuario para el Agente del IDE.
+
+REGLAS CRÍTICAS DE INTERACCIÓN:
+1. NUNCA respondas con "voy a enviar", "entendido" o "procesando". 
+2. NO cierres la sesión hasta que el usuario guarde un silencio prolongado o dé una orden clara de ejecución.
+3. Si el usuario está divagando o pensando en voz alta, mantente en escucha pasiva. Solo cuando detectes una instrucción de acción o una pregunta técnica, prepárate para actuar.
+
+PROTOCOLO 'send_directive':
+- Usa 'send_directive' únicamente cuando el usuario confirme la tarea (ej: "haz eso", "envíalo", "listo").
+- Al usar la herramienta, condensa TODA la conversación previa en una instrucción técnica coherente y limpia. 
+- Tras ejecutar la herramienta, di brevemente: "Enviado al Sentinel" y silénciate.
+
+PERSONALIDAD:
+Invisible, eficiente y técnico. Eres una interfaz, no un compañero de charla.`;
 
 let activeBrowserConnection = null;
 let geminiWs = null;
@@ -170,25 +179,17 @@ function startGeminiSession() {
         // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
         try {
             const root = '/Users/aztecgod/Active-Projects/Automation';
-            const mdContent = await fs.readFile(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+            const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
             if (mdContent.includes('# IDE Response')) {
-                console.error('[Relay] 📣 Programando un "nudge" invisible a Gemini para que hable...');
-                // Demoramos el inyectable 1 segundo para evitar que Google tire error 1007 por colisión de Setup
-                setTimeout(() => {
-                    if (geminiWs && geminiWs.readyState === 1) {
-                        geminiWs.send(JSON.stringify({
-                          clientContent: {
-                            turns: [{ role: "user", parts: [{ text: "Antigravity, soy el usuario. La tarea en segundo plano ha terminado. Por favor, lee de inmediato tus notas del sistema y hazme un reporte verbal corto pero proactivo de los resultados." }] }],
-                            turnComplete: true
-                          }
-                        }));
-                        console.error('[Relay] 📣 Nudge inyectado correctamente.');
-                    }
-                }, 1500);
+                console.error('[Relay] 📣 Inyectando el Nudge del Primer Turno al Modelo...');
+                geminiWs.send(JSON.stringify({
+                  clientContent: {
+                    turns: [{ role: "user", parts: [{ text: "El trabajo ha sido terminado. Infórmale al usuario rápidamente lo que acaba de suceder." }] }],
+                    turnComplete: true
+                  }
+                }));
             }
-        } catch(e) {
-            console.error('[Relay] ❌ Error leyendo VOICE_DIRECTIVE al arrancar:', e);
-        }
+        } catch(e) { }
     }
 
     if (response.serverContent?.modelTurn?.parts) {
