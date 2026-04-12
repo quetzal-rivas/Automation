@@ -53,9 +53,40 @@ function playPcmChunk(base64Data) {
   nextStartTime += buffer.duration;
 }
 
+function playChirpTone() {
+  initAudioContext();
+  const now = audioContext.currentTime;
+  
+  // Tres trinos rápidos ascendentes (Sci-Fi style)
+  const playSingleChirp = (delay) => {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, now + delay);
+    osc.frequency.exponentialRampToValueAtTime(1600, now + delay + 0.1);
+    
+    gain.gain.setValueAtTime(0, now + delay);
+    gain.gain.linearRampToValueAtTime(0.2, now + delay + 0.02);
+    gain.gain.linearRampToValueAtTime(0, now + delay + 0.1);
+    
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+    
+    osc.start(now + delay);
+    osc.stop(now + delay + 0.1);
+  };
+
+  playSingleChirp(0);
+  playSingleChirp(0.15);
+  playSingleChirp(0.3);
+}
+
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'AUDIO_CHUNK') {
     playPcmChunk(msg.data);
+  } else if (msg.type === 'PLAY_CHIRP') {
+    playChirpTone();
   } else if (msg.type === 'PLAY_RING') {
     playRingTone();
   } else if (msg.type === 'STOP_RING') {

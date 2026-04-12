@@ -66,6 +66,9 @@ async function showCallOverlay(data) {
       chrome.tabs.create({ url: 'mic.html', active: true });
   }
 
+  // REQUISITO: Tocar los 3 trinos (Sci-Fi chirp) antes de iniciar Gemini
+  chrome.runtime.sendMessage({ type: 'PLAY_CHIRP' });
+
   // Autocontestar la llamada de inmediato (Auto-Answer) para iniciar Gemini
   callStatus = 'CONNECTING';
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -81,6 +84,7 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log('[Background] Iniciando sesión por petición del Popup');
     callStatus = 'CONNECTING';
     await startOffscreenAudio();
+    chrome.runtime.sendMessage({ type: 'PLAY_CHIRP' });
     chrome.runtime.sendMessage({ type: 'PLAY_RING' });
 
     // ESTO FALTABA: Avisar al Relay que despierte a Gemini
