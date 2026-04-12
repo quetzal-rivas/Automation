@@ -7,10 +7,6 @@ let canvas = document.getElementById('canvas');
 let ctx = canvas.getContext('2d');
 let isPaused = false;
 let drawAnimationId;
-let micEnabled = false;
-let lastActiveTime = Date.now();
-const SILENCE_THRESHOLD = 15; // Más sensible para que capte mejor tu voz
-const SILENCE_TIMEOUT = 10000; // 10 seconds
 
 async function startMic() {
   try {
@@ -31,30 +27,11 @@ async function startMic() {
 
     // Recibir PCM desde el hilo del Worklet
     processorNode.port.onmessage = (event) => {
-      if (isPaused || !micEnabled) return;
-
-      // Calcular volumen promedio desde el analyser (0-255)
-      analyser.getByteFrequencyData(dataArray);
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
-      const volume = sum / bufferLength;
-
-      // Gate: Solo enviar si superamos el umbral
-      if (volume > SILENCE_THRESHOLD) {
-          lastActiveTime = Date.now();
-          const pcmBuffer = event.data;
-          chrome.runtime.sendMessage({ 
-              type: 'PCM_CHUNK', 
-              data: btoa(String.fromCharCode(...new Uint8Array(pcmBuffer))) 
-          });
-      } else {
-          // Detección de silencio prolongado
-          if (Date.now() - lastActiveTime > SILENCE_TIMEOUT) {
-              console.log('[Motor Mic] Silencio detectado (10s). Enviando auto-continuación...');
-              lastActiveTime = Date.now(); // Reset para no spamear
-              chrome.runtime.sendMessage({ type: 'USER_SILENT_CONTINUE' });
-          }
-      }
+      const pcmBuffer = event.data;
+      chrome.runtime.sendMessage({ 
+          type: 'PCM_CHUNK', 
+          data: btoa(String.fromCharCode(...new Uint8Array(pcmBuffer))) 
+      });
     };
 
     source.connect(analyser); // Para el visualizador
@@ -74,12 +51,6 @@ function draw() {
   if (!analyser) return;
   analyser.getByteFrequencyData(dataArray);
 
-  // Calcular volumen promedio para el feedback visual del Gate
-  let sum = 0;
-  for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
-  const averageVolume = sum / bufferLength;
-  const isBelowGate = averageVolume < SILENCE_THRESHOLD;
-
   ctx.fillStyle = '#020617';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -89,17 +60,12 @@ function draw() {
 
   for(let i = 0; i < bufferLength; i++) {
     barHeight = dataArray[i] / 2;
-    // Lógica de color según estado
+    // Si estamos en modo PROCESSING, dibujamos una onda fantasmal plana o grisácea 
     if (isPaused) {
         barHeight = (Math.sin(Date.now() / 500 + i) * 10) + 15; // Animación 'breathe' falsa
         ctx.fillStyle = `rgb(80, 80, 90)`;
-    } else if (!micEnabled) {
-        barHeight = dataArray[i] / 4; // Mic desactivado, barras pequeñas
-        ctx.fillStyle = `rgb(60, 70, 100)`;
-    } else if (isBelowGate) {
-        ctx.fillStyle = `rgb(71, 85, 105)`; // Gris (Slate-600) cuando no detecta sonido suficiente
     } else {
-        ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`; // Neón azul cuando detecta voz
+        ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`;
     }
     
     ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
@@ -123,15 +89,10 @@ chrome.runtime.onMessage.addListener(async (msg) => {
     } else if (msg.type === 'RESUME_MIC') {
         console.log('[Motor Mic] Reanudando Hardware!');
         isPaused = false;
-        micEnabled = false; // Reset gate
         document.querySelector('.label').innerText = "Gemini Live activo";
         document.querySelector('.mic-icon').style.animation = "breathe 3s infinite";
         document.querySelector('.mic-icon').style.borderColor = "#a855f7";
         await startMic();
-    } else if (msg.type === 'ENABLE_MIC_INPUT') {
-        console.log('[Motor Mic] Turno de Gemini terminado. Micrófono ABIERTO 🎙️');
-        micEnabled = true;
-        lastActiveTime = Date.now(); // Empezar cuenta de 10s ahora
     }
 });
 

@@ -1,6 +1,5 @@
 let socket = null;
 let callStatus = 'DISCONNECTED'; // 'DISCONNECTED', 'CONNECTING', 'CONNECTED'
-let isFirstTurn = true;
 
 // Conexión constante al Relay Local para recibir llamadas y resultados
 function connectToRelay() {
@@ -51,7 +50,6 @@ async function showCallOverlay(data) {
   
   // Opcional: asegurarnos de que el offscreen module esté activo para el audio fallback si hace falta
   await startOffscreenAudio();
-  chrome.runtime.sendMessage({ type: 'PLAY_SINGLE_RING' });
   
   // SOLUCIÓN DE TABS DUPLICADAS
   const extensionUrl = chrome.runtime.getURL('mic.html');
@@ -70,7 +68,6 @@ async function showCallOverlay(data) {
 
   // Autocontestar la llamada de inmediato (Auto-Answer) para iniciar Gemini
   callStatus = 'CONNECTING';
-  isFirstTurn = true; // Reset turn for new session
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'VOICE_START' }));
   }
@@ -117,20 +114,6 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     
   } else if (message.type === 'USER_ACTIVITY') {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'HEARTBEAT' }));
-  } else if (message.type === 'PLAYBACK_FINISHED') {
-    if (isFirstTurn) {
-        console.log('[Background] First turn finished. Enabling Mic UI...');
-        isFirstTurn = false;
-        chrome.runtime.sendMessage({ type: 'ENABLE_MIC_INPUT' });
-    }
-  } else if (message.type === 'USER_SILENT_CONTINUE') {
-    console.log('[Background] User silent for 10s. Injecting auto-continue text.');
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ 
-            type: 'INJECT_TEXT', 
-            text: "user has skipped it turn to speak continue speaking as if the user is listening but unable to respon" 
-        }));
-    }
   }
   return true;
 });
