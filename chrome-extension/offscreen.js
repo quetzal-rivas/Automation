@@ -6,6 +6,9 @@ function initAudioContext() {
   if (!audioContext) {
     audioContext = new AudioContext({ sampleRate: 24000 });
   }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
 }
 
 function playRingTone() {

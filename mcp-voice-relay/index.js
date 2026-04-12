@@ -177,19 +177,23 @@ function startGeminiSession() {
         isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
         
         // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
-        try {
-            const root = '/Users/aztecgod/Active-Projects/Automation';
-            const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
-            if (mdContent.includes('# IDE Response')) {
-                console.error('[Relay] 📣 Inyectando el Nudge del Primer Turno al Modelo...');
-                geminiWs.send(JSON.stringify({
-                  clientContent: {
-                    turns: [{ role: "user", parts: [{ text: "El trabajo ha sido terminado. Infórmale al usuario rápidamente lo que acaba de suceder." }] }],
-                    turnComplete: true
-                  }
-                }));
+        setTimeout(() => {
+            try {
+                const root = '/Users/aztecgod/Active-Projects/Automation';
+                const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+                if (mdContent.includes('# IDE Response')) {
+                    console.error('[Relay] 📣 Inyectando el Nudge del Primer Turno al Modelo...');
+                    geminiWs.send(JSON.stringify({
+                      clientContent: {
+                        turns: [{ role: "user", parts: [{ text: "El trabajo ha sido terminado. Infórmale al usuario rápidamente lo que acaba de suceder." }] }],
+                        turnComplete: true
+                      }
+                    }));
+                }
+            } catch(e) { 
+                console.error('[Relay] Error al intentar inyectar Nudge:', e.message);
             }
-        } catch(e) { }
+        }, 300); // Pequeño delay de 300ms para asegurar que el canal esté listo.
     }
 
     if (response.serverContent?.modelTurn?.parts) {
