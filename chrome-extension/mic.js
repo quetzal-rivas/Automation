@@ -74,6 +74,12 @@ function draw() {
   if (!analyser) return;
   analyser.getByteFrequencyData(dataArray);
 
+  // Calcular volumen promedio para el feedback visual del Gate
+  let sum = 0;
+  for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+  const averageVolume = sum / bufferLength;
+  const isBelowGate = averageVolume < SILENCE_THRESHOLD;
+
   ctx.fillStyle = '#020617';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -83,15 +89,17 @@ function draw() {
 
   for(let i = 0; i < bufferLength; i++) {
     barHeight = dataArray[i] / 2;
-    // Si estamos en modo PROCESSING, dibujamos una onda fantasmal plana o grisácea 
+    // Lógica de color según estado
     if (isPaused) {
         barHeight = (Math.sin(Date.now() / 500 + i) * 10) + 15; // Animación 'breathe' falsa
         ctx.fillStyle = `rgb(80, 80, 90)`;
     } else if (!micEnabled) {
         barHeight = dataArray[i] / 4; // Mic desactivado, barras pequeñas
         ctx.fillStyle = `rgb(60, 70, 100)`;
+    } else if (isBelowGate) {
+        ctx.fillStyle = `rgb(71, 85, 105)`; // Gris (Slate-600) cuando no detecta sonido suficiente
     } else {
-        ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`;
+        ctx.fillStyle = `rgb(${barHeight + 100}, 130, 255)`; // Neón azul cuando detecta voz
     }
     
     ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
