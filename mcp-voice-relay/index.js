@@ -116,18 +116,9 @@ function startGeminiSession() {
   geminiWs.on('open', async () => {
     console.error('[Gemini] 🟢 Conexión con Google ABIERTA');
 
-    // --- MAGIA: Lectura de la memoria del IDE ---
-    let extraContext = "";
-    try {
-        const mdContent = await fs.readFile('/Users/aztecgod/Active-Projects/Automation/VOICE_DIRECTIVE.md', 'utf-8');
-        extraContext = `\n\n[NOTA: El IDE (Yo) acaba de terminar de trabajar en el código. Esto fue lo que pasó y el requerimiento previo:\n${mdContent}\nPor favor actúa como si TÚ hubieras hecho ese código, dale al usuario un reporte súper rápido amigable y pregúntale qué más quiere programar.]`;
-    } catch (e) {
-        // Nada que reportar
-    }
-    
     const setupMsg = {
       setup: {
-        model: "models/gemini-3.1-flash-live-preview", // ¡El último grito de Marzo 2026!
+        model: "models/gemini-3.1-flash-live-preview", 
         generation_config: { 
           response_modalities: ["audio"],
           speech_config: {
@@ -156,7 +147,7 @@ function startGeminiSession() {
             }
           ]
         }],
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT + extraContext }] }
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] }
       }
     };
     console.error('[Gemini] 📤 Enviando SETUP (SUPER LIVE 3.1):', JSON.stringify(setupMsg, null, 2));
@@ -177,21 +168,23 @@ function startGeminiSession() {
         isGeminiReady = true; // ¡Ahora sí se abre el semáforo!
         
         // Magia Stateless: Si nos acaban de despertar, vemos si es porque el IDE terminó su tarea.
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
                 const root = '/Users/aztecgod/Active-Projects/Automation';
-                const mdContent = fs.readFileSync(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
-                if (mdContent.includes('# IDE Response')) {
-                    console.error('[Relay] 📣 Inyectando el Nudge del Primer Turno al Modelo...');
-                    geminiWs.send(JSON.stringify({
-                      clientContent: {
-                        turns: [{ role: "user", parts: [{ text: "El trabajo ha sido terminado. Infórmale al usuario rápidamente lo que acaba de suceder." }] }],
-                        turnComplete: true
-                      }
-                    }));
-                }
+                const mdContent = await fs.readFile(path.join(root, 'VOICE_DIRECTIVE.md'), 'utf8');
+                
+                console.error('[Relay] 📣 Inyectando VOICE_DIRECTIVE.md y enviando mensaje...');
+                geminiWs.send(JSON.stringify({
+                  clientContent: {
+                    turns: [
+                        { role: "user", parts: [{ text: `MEMORIA_CONTEXTO:\n${mdContent}` }] },
+                        { role: "user", parts: [{ text: "¡Hola! Infórmame rápidamente el estado del trabajo según el contexto anterior y pregúntame qué sigue." }] }
+                    ],
+                    turnComplete: true
+                  }
+                }));
             } catch(e) { 
-                console.error('[Relay] Error al intentar inyectar Nudge:', e.message);
+                console.error('[Relay] Error al inyectar contexto:', e.message);
             }
         }, 300); // Pequeño delay de 300ms para asegurar que el canal esté listo.
     }
