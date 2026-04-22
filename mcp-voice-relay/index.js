@@ -8,13 +8,24 @@ import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 dotenv.config();
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const API_BASE_URL = process.env.API_BASE_URL;
-const AGENT_ID = process.env.AGENT_ID;
+const API_BASE_URL = process.env.API_BASE_URL || "https://mrdbw1d3e9.execute-api.us-east-2.amazonaws.com/prod";
+const AGENT_ID = process.env.AGENT_ID || "vscode-macbook-pro";
 const BEARER_TOKEN = process.env.BEARER_TOKEN;
+const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || `anomaly-capture-agentic-hub-stack-${process.env.AWS_ACCOUNT_ID || 'default'}`;
+
+// --- ENERGY ENGINE & BLACKBOX CONSTANTS ---
+const ANOMALY_THRESHOLD_DB = 120; // Stage 1: Emergency Gatekeeper
+const RING_BUFFER_SECONDS = 25;   // 25s pre-event memory
+const POST_ANOMALY_SECONDS = 5;   // 5s post-event context
+const SAMPLE_RATE = 16000;
+const CHUNK_SAMPLES = 4096;       // Matches AudioWorklet chunk size
+const RING_BUFFER_MAX_CHUNKS = Math.ceil((RING_BUFFER_SECONDS * SAMPLE_RATE) / CHUNK_SAMPLES);
+const POST_ANOMALY_CHUNKS = Math.ceil((POST_ANOMALY_SECONDS * SAMPLE_RATE) / CHUNK_SAMPLES);
 
 // --- DUAL-LOGGER: Imprimir en consola y guardar en archvio Markdown ---
 const LOG_FILE_PATH = path.join('/Users/aztecgod/Active-Projects/Automation', 'Geminivoicelogs.md');
@@ -41,6 +52,49 @@ PROTOCOL: "THINKING OUT LOUD" Turn-Based Execution
 5. LIVE INTERRUPTIONS: If the user says "Stop" or "Click more to the right", acknowledge it immediately. You are the user's direct line to the IDE's hands.
 6. PERSPECTIVE: Speak as if you ARE Antigravity, and the IDE is your physical extension. "I'm reaching into the browser now..." or "I've finished that change, take a look."
 7. ALWAYS speak in English.`;
+
+/**
+ * Calculates decibels (dB) for a PCM Int16 audio chunk.
+ */
+function calculateRMS(base64String) {
+  const buffer = Buffer.from(base64String, 'base64');
+  const pcm16 = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 2);
+  if (pcm16.length === 0) return -Infinity;
+  
+  let sumSquares = 0;
+  for (let i = 0; i < pcm16.length; i++) {
+    const normalized = pcm16[i] / 32768.0;
+    sumSquares += normalized * normalized;
+  }
+  const rms = Math.sqrt(sumSquares / pcm16.length);
+  return 20 * Math.log10(rms || 1e-9);
+}
+
+/**
+ * Standard WAV header for 16kHz Mono 16-bit PCM.
+ */
+function createWavHeader(dataLength) {
+  const buffer = Buffer.alloc(44);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataLength, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(16000, 24);
+  buffer.writeUInt32LE(32000, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataLength, 40);
+  return buffer;
+}
+
+const s3Client = new S3Client({ region: process.env.AWS_REGION || "us-east-2" });
+
+const ringBuffer = [];
+let anomalyDetectionTimeout = null;
 
 let activeBrowserConnection = null;
 let geminiWs = null;
@@ -72,6 +126,58 @@ wss.on('connection', (ws) => {
       // ELIMINACIÓN DEFINITIVA DE MEDIA_CHUNKS (MODO 2026)
       if (geminiWs && geminiWs.readyState === WebSocket.OPEN && isGeminiReady) {
         const base64Data = data.toString('base64');
+        const dbLevel = calculateRMS(base64Data);
+
+        // --- BLACKBOX: Circular Buffer Maintenance ---
+        ringBuffer.push({ base64: base64Data, db: dbLevel, ts: Date.now() });
+        if (ringBuffer.length > RING_BUFFER_MAX_CHUNKS + POST_ANOMALY_CHUNKS) {
+          ringBuffer.shift();
+        }
+
+        // --- STAGE 1 & 2: EMERGENCY GATEKEEPER & S3 SNAPSHOT ---
+        if (dbLevel > ANOMALY_THRESHOLD_DB && !anomalyDetectionTimeout) {
+          console.error(`[Relay] 🚨 ANOMALY DETECTED: ${dbLevel.toFixed(1)}dB. Triggering emergency protocols.`);
+          
+          // 1. SILENCE THE BROWSER (Interruption)
+          activeBrowserConnection?.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
+
+          // 2. TRIGGER OUTBOUND REACH-OUT (AWS)
+          apiRequest('POST', '/trigger-call', { 
+            agent_id: AGENT_ID, 
+            summary: `EMERGENCY ALERT: High-decibel anomaly detected (${dbLevel.toFixed(1)}dB) in the developer environment. Please check for status.` 
+          }).then(res => {
+            console.error(`[Relay] 📞 Emergency call initiated via AWS:`, JSON.stringify(res));
+          }).catch(err => {
+            console.error(`[Relay] ❌ Failed to trigger emergency call:`, err.message);
+          });
+
+          // 3. CAJA NEGRA (S3 SNAPSHOT) - Wait 5s for post-context
+          anomalyDetectionTimeout = setTimeout(async () => {
+            try {
+              console.error(`[Relay] 💾 Capturing Blackbox snapshot for S3...`);
+              const snapshot = [...ringBuffer];
+              const pcmData = Buffer.concat(snapshot.map(c => Buffer.from(c.base64, 'base64')));
+              const wavHeader = createWavHeader(pcmData.length);
+              const wavBuffer = Buffer.concat([wavHeader, pcmData]);
+
+              const key = `anomalies/${AGENT_ID}/${new Date().toISOString().replace(/[:.]/g, '-')}.wav`;
+              
+              await s3Client.send(new PutObjectCommand({
+                Bucket: S3_BUCKET_NAME,
+                Key: key,
+                Body: wavBuffer,
+                ContentType: 'audio/wav'
+              }));
+              
+              console.error(`[Relay] ✅ Blackbox snapshot uploaded to S3: s3://${S3_BUCKET_NAME}/${key}`);
+            } catch (err) {
+              console.error(`[Relay] ❌ S3 Upload failed:`, err.message);
+            } finally {
+              anomalyDetectionTimeout = null;
+            }
+          }, POST_ANOMALY_SECONDS * 1000);
+        }
+
         const audioPayload = {
           realtimeInput: {
             audio: {
@@ -80,9 +186,6 @@ wss.on('connection', (ws) => {
             }
           }
         };
-        // Log para saber exactamente cuándo sale el primer chunk
-        // (Desactivado para no spamear los logs ni colapsar la RAM)
-        // console.error(`[Relay] 📤 Enviando chunk de AUDIO a Gemini...`);
         geminiWs.send(JSON.stringify(audioPayload));
       }
     }

@@ -73,6 +73,7 @@ def lambda_handler(event, context):
                 'session_id': latest_item['session_id'],
                 'directive': latest_item['directive'],
                 'summary': latest_item.get('summary', ''),
+                'ai_summary': latest_item.get('ai_summary', ''),
                 'created_at': latest_item.get('created_at'),
                 'call_duration': latest_item.get('call_duration', 0)
             })

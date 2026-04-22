@@ -66,6 +66,7 @@ export function normalizeDirectivePayload(payload) {
   const status = pickValue(root, ["status", "state", "agent_status"]);
   const sessionId = pickValue(root, ["session_id", "sessionId", "session"]);
   const timestamp = pickValue(root, ["timestamp", "updated_at", "updatedAt", "created_at", "createdAt"]);
+  const aiSummary = pickValue(root, ["ai_summary", "aiSummary", "summary"]);
 
   return {
     hasDirective: typeof directive === "string" ? directive.trim().length > 0 : directive !== undefined && directive !== null,
@@ -73,6 +74,7 @@ export function normalizeDirectivePayload(payload) {
     status: status ?? null,
     sessionId: sessionId ?? null,
     timestamp: timestamp ?? null,
+    aiSummary: aiSummary ?? null,
     raw: payload
   };
 }

@@ -6,6 +6,6 @@ npm-debug.log*
 .vscode/
 
 # Nested Workspaces
-nextjs-mirror-ui/
+
 vscode-backend/
 desechable-projects-brokethem-while-extracting-funcitonality/

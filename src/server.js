@@ -1,5 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 function asString(value, fieldName) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -56,6 +58,21 @@ function toToolResult(payload) {
       }
     ]
   };
+}
+
+/**
+ * Syncs the AI summary to the local Memory Cortex (.whisper_context.md)
+ */
+async function syncCortex(summary) {
+  if (!summary) return;
+  try {
+    const cortexPath = path.join(process.cwd(), ".whisper_context.md");
+    const entry = `\n---\n**Hora:** ${new Date().toISOString()}\n**Memoria (Sync):** ${summary}\n`;
+    await fs.appendFile(cortexPath, entry);
+    process.stderr.write(`[Cortex] 🧠 Memory synced to ${cortexPath}\n`);
+  } catch (err) {
+    process.stderr.write(`[Cortex] ❌ Sync failed: ${err.message}\n`);
+  }
 }
 
 export function createDirectiveServer(config, client) {
@@ -166,12 +183,16 @@ export function createDirectiveServer(config, client) {
           });
         }
 
-        case "get_directive": {
           const result = await client.getDirective({
             includeConsumed: asOptionalBoolean(args.include_consumed, "include_consumed"),
             sessionId: asOptionalString(args.session_id, "session_id"),
             since: asOptionalString(args.since, "since")
           });
+
+          // Sync situational memory to cortex
+          if (result.ai_summary) {
+            await syncCortex(result.ai_summary);
+          }
 
           return toToolResult({
             agent_id: config.agentId,
@@ -180,13 +201,13 @@ export function createDirectiveServer(config, client) {
           });
         }
 
-        case "wait_for_directive": {
-          const returnOnStatuses = asOptionalStringArray(args.return_on_statuses, "return_on_statuses");
-          const result = await client.waitForDirective({
-            timeoutSeconds: asOptionalNumber(args.timeout_seconds, "timeout_seconds"),
-            pollIntervalSeconds: asOptionalNumber(args.poll_interval_seconds, "poll_interval_seconds"),
             returnOnStatuses
           });
+
+          // Sync situational memory to cortex
+          if (result.aiSummary) {
+            await syncCortex(result.aiSummary);
+          }
 
           return toToolResult({
             agent_id: config.agentId,

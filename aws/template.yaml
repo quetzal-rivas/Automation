@@ -73,6 +73,18 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
+  AnomalyCaptureBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "anomaly-capture-${AWS::StackName}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
   # IAM Role for Lambdas
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -103,6 +115,14 @@ Resources:
                 Resource: 
                   - !GetAtt AgentDirectiveTable.Arn
                   - !Sub "${AgentDirectiveTable.Arn}/index/*"
+        - PolicyName: S3CaptureAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "${AnomalyCaptureBucket.Arn}/*"
         - PolicyName: EventBridgeScheduling
           PolicyDocument:
             Version: '2012-10-17'
