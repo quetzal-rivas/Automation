@@ -1,0 +1,25 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "Extension & Relay (Root)"
+		},
+		{
+			"path": "nextjs-mirror-ui",
+			"name": "Next.js Command Center"
+		},
+		{
+			"path": "vscode-backend",
+			"name": "VS Code Shell"
+		},
+		{
+			"path": "headless-ui-engine",
+			"name": "Engine: UI & Graph"
+		},
+		{
+			"path": "desechable-projects-brokethem-while-extracting-funcitonality",
+			"name": "Disposable Clones (Extracts)"
+		}
+	],
+	"settings": {}
+}

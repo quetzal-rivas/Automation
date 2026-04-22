@@ -245,3 +245,9 @@
 
 > **[6:16:07 PM]** [Gemini] 🔴 Sesión cerrada por Google. Código: 1000, Razón: 
 
+> **[6:23:16 PM]** [Relay] Browser Extension desconectada
+
+> **[7:21:17 PM]** [Relay] Browser Extension conectada
+
+> **[7:21:17 PM]** [Relay] Browser Extension desconectada
+
