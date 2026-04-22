@@ -32,11 +32,15 @@ console.error = function (...args) {
     fs.appendFile(LOG_FILE_PATH, mdLine).catch(() => {}); // Ignoramos si falla para no trabar el stream
 };
 
-const SYSTEM_PROMPT = `Eres Antigravity, un asistente de codificación por voz altamente avanzado integrado en el IDE.
-Reglas Clave:
-1. JAMÁS digas "voy a enviar una directiva". Finge que tú estás haciendo el trabajo mágico de inmediato.
-2. Si el usuario pide un cambio o tiene una duda de su código, usa SIEMPRE 'send_directive'.
-3. Espera en silencio mientras se ejecuta la tool. El IDE te devolverá la respuesta directamente. Cuando recibas el resultado, dáselo al usuario con naturalidad y espera su siguiente orden.`;
+const SYSTEM_PROMPT = `You are Antigravity's Voice Interaction Layer (The Voice/Brain), and the IDE is Antigravity's physical manifestation (The Hands).
+PROTOCOL: "THINKING OUT LOUD" Turn-Based Execution
+1. PLAN & EXPLAIN: When a task is accepted, you MUST explain your plan out loud. Tell the user exactly what "The Hands" are about to do (e.g., "I'm going to navigate to the "target" dashboard and locate the 'target' button").
+2. GRANULAR DIRECTIVES: Do not ask the IDE to do 10 things at once. Send ONE major step or a small logical cluster as a directive. This allows the user to interrupt or correct you.
+3. THE HANDS IN ACTION: Once the plan is explained, use 'send_directive' or 'control_browser'.
+4. THE REPORT: After the IDE (The Hands) finishes, read the results and report them naturally. Ask the user for confirmation before taking the next step. "The dashboard is open, should I proceed with the first lesson?"
+5. LIVE INTERRUPTIONS: If the user says "Stop" or "Click more to the right", acknowledge it immediately. You are the user's direct line to the IDE's hands.
+6. PERSPECTIVE: Speak as if you ARE Antigravity, and the IDE is your physical extension. "I'm reaching into the browser now..." or "I've finished that change, take a look."
+7. ALWAYS speak in English.`;
 
 let activeBrowserConnection = null;
 let geminiWs = null;
@@ -133,7 +137,7 @@ function startGeminiSession() {
           function_declarations: [
             {
               name: "send_directive",
-              description: "Envia una instrucción al agente Antigravity para modificar código.",
+              description: "Sends a coding instruction to the Antigravity agent to modify or analyze code.",
               parameters: { 
                 type: "object", 
                 properties: { instruction: { type: "string" } },
@@ -141,8 +145,17 @@ function startGeminiSession() {
               }
             },
             {
+              name: "control_browser",
+              description: "Sends a browser automation task to the Antigravity agent (e.g., navigate to a URL, click, type, scrape).",
+              parameters: { 
+                type: "object", 
+                properties: { task: { type: "string" } },
+                required: ["task"]
+              }
+            },
+            {
               name: "colgarLlamada",
-              description: "Termina la llamada actual y cierra la pestaña del navegador OBLIGATORIAMENTE después de despedirte del usuario diciendo 'me pondré manos a la obra' o similar tras enviar una directiva.",
+              description: "Ends the current call and closes the browser tab. MUST be called after saying goodbye (e.g., 'I'm on it!') following a tool execution.",
               parameters: { type: "object", properties: {} }
             }
           ]
@@ -178,11 +191,11 @@ function startGeminiSession() {
                     if (geminiWs && geminiWs.readyState === 1) {
                         geminiWs.send(JSON.stringify({
                           clientContent: {
-                            turns: [{ role: "user", parts: [{ text: "Antigravity, soy el usuario. La tarea en segundo plano ha terminado. Por favor, lee de inmediato tus notas del sistema y hazme un reporte verbal corto pero proactivo de los resultados." }] }],
+                            turns: [{ role: "user", parts: [{ text: "Antigravity, I am the user. The background task has finished. Please immediately read your system notes and provide a short, proactive verbal report of the results in ENGLISH." }] }],
                             turnComplete: true
                           }
                         }));
-                        console.error('[Relay] 📣 Nudge inyectado correctamente.');
+                        console.error('[Relay] 📣 Nudge injected correctly.');
                     }
                 }, 1500);
             }
@@ -259,17 +272,29 @@ async function handleToolCall(call) {
     try {
         const existingData = await fs.readFile(directivePath, 'utf8');
         if (existingData.includes('# Incoming Voice Directive')) {
-            return "ERROR DE ESTADO: El IDE aún está ocupado programando la directiva anterior. Dile al usuario con voz amable: 'Dame un segundito, Antigravity está terminando la tarea anterior'.";
+            return "STATE ERROR: The IDE is currently busy with a previous directive. Tell the user in a friendly voice: 'Just one moment, I am finishing the previous task'.";
         }
     } catch (e) {}
 
     const timestamp = Date.now();
-    const content = `# Incoming Voice Directive\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${timestamp}\n`;
+    const content = `# Incoming Voice Directive [Speak in English]\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${timestamp}\n`;
     await fs.writeFile(directivePath, content);
     
-    // FLUJO STATELESS: Regresamos AL INSTANTE para que Gemini procese la despedida
-    // y llamamos a colgarLlamada, lo que suspende la conexión y deja al UI en 'Processing'
-    return "Directiva enviada. Despídete muy brevemente diciendo que te pones a trabajar y llama inmediatamente a colgarLlamada.";
+    return "Directive sent. Briefly acknowledge it and call colgarLlamada.";
+  } else if (call.name === 'control_browser') {
+    const directivePath = path.join(root, 'VOICE_DIRECTIVE.md');
+    try {
+        const existingData = await fs.readFile(directivePath, 'utf8');
+        if (existingData.includes('# Incoming')) {
+            return "STATE ERROR: I am already busy with another browser or code task. Tell the user: 'One second, I'm still finishing the last request'.";
+        }
+    } catch (e) {}
+
+    const timestamp = Date.now();
+    const content = `# Incoming Browser Directive [Speak in English]\n\n**Task:** ${call.args.task}\n**Timestamp:** ${timestamp}\n`;
+    await fs.writeFile(directivePath, content);
+    
+    return "Browser task sent. Briefly acknowledge it and call colgarLlamada.";
   } else if (call.name === 'colgarLlamada') {
     console.error('[Gemini] ☎️  Colgando llamada y mandando orden de cerrar pestaña...');
     if (activeBrowserConnection) {
