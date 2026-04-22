@@ -136,6 +136,10 @@ Resources:
                 Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/callback-*'
               - Effect: Allow
                 Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - lambda:AddPermission
                   - lambda:InvokeFunction
                 Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*'
@@ -190,6 +194,25 @@ Resources:
           Properties:
             RestApiId: !Ref ApiGatewayApi
             Path: /trigger-call
+            Method: post
+ 
+  LifecycleRelayFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-lifecycle-relay-${AWS::StackName}"
+      CodeUri: src/lifecycle_relay/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          POLICY_ENGINE_FUNCTION: TacticalPolicyEngine
+          TRIGGER_CALL_FUNCTION: !Ref TriggerCallFunction
+      Events:
+        LifecycleApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /lifecycle
             Method: post
 
 

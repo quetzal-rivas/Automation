@@ -141,14 +141,15 @@ wss.on('connection', (ws) => {
           // 1. SILENCE THE BROWSER (Interruption)
           activeBrowserConnection?.send(JSON.stringify({ type: 'CLEAR_AUDIO_QUEUE' }));
 
-          // 2. TRIGGER OUTBOUND REACH-OUT (AWS)
-          apiRequest('POST', '/trigger-call', { 
-            agent_id: AGENT_ID, 
-            summary: `EMERGENCY ALERT: High-decibel anomaly detected (${dbLevel.toFixed(1)}dB) in the developer environment. Please check for status.` 
+          // 2. TRIGGER CLOUD REFLEX (Lifecycle Bridge)
+          apiRequest('POST', '/lifecycle', { 
+            eventType: 'ANOMALY_DETECTED', 
+            tenantId: AGENT_ID, 
+            metadata: { dbLevel: dbLevel.toFixed(1) } 
           }).then(res => {
-            console.error(`[Relay] 📞 Emergency call initiated via AWS:`, JSON.stringify(res));
+            console.error(`[Relay] ⚡ Lifecycle Reflex initiated:`, JSON.stringify(res));
           }).catch(err => {
-            console.error(`[Relay] ❌ Failed to trigger emergency call:`, err.message);
+            console.error(`[Relay] ❌ Lifecycle broadcast failed:`, err.message);
           });
 
           // 3. CAJA NEGRA (S3 SNAPSHOT) - Wait 5s for post-context
@@ -260,6 +261,41 @@ function startGeminiSession() {
               name: "colgarLlamada",
               description: "Ends the current call and closes the browser tab. MUST be called after saying goodbye (e.g., 'I'm on it!') following a tool execution.",
               parameters: { type: "object", properties: {} }
+            },
+            {
+              name: "compile_policy",
+              description: "Updates the natural-language behavioral rules for the system (e.g., 'Only call the user after 6pm').",
+              parameters: { 
+                type: "object", 
+                properties: { 
+                  naturalLanguageRules: { type: "string" } 
+                },
+                required: ["naturalLanguageRules"]
+              }
+            },
+            {
+              name: "start_mission",
+              description: "Starts a complex, multi-step mission with dependencies (DAG). Useful for long-running workflows.",
+              parameters: { 
+                type: "object", 
+                properties: { 
+                  name: { type: "string" },
+                  tasks: { 
+                    type: "array", 
+                    items: {
+                      type: "object",
+                      properties: {
+                        taskId: { type: "string" },
+                        action: { type: "string" },
+                        dependsOn: { type: "array", items: { type: "string" } },
+                        payload: { type: "object" }
+                      },
+                      required: ["action"]
+                    }
+                  }
+                },
+                required: ["name", "tasks"]
+              }
             }
           ]
         }],
@@ -383,6 +419,18 @@ async function handleToolCall(call) {
     const content = `# Incoming Voice Directive [Speak in English]\n\n**Instruction:** ${call.args.instruction}\n**Timestamp:** ${timestamp}\n`;
     await fs.writeFile(directivePath, content);
     
+    // Stage 5: Register as a Single-Task Mission for Cloud Observability
+    apiRequest('POST', '/orchestrator', {
+        action: 'START_MISSION',
+        payload: {
+            tasks: [{
+                taskId: `voice-dir-${timestamp}`,
+                action: 'EXECUTE_DIRECTIVE',
+                payload: { instruction: call.args.instruction }
+            }]
+        }
+    }).catch(err => console.error(`[Mission] Mirror mission sync failed: ${err.message}`));
+
     return "Directive sent. Briefly acknowledge it and call colgarLlamada.";
   } else if (call.name === 'control_browser') {
     const directivePath = path.join(root, 'VOICE_DIRECTIVE.md');
@@ -405,6 +453,21 @@ async function handleToolCall(call) {
     }
     setTimeout(stopGeminiSession, 500); // Pequeño delay para que alcance a mandar el mensaje WS
     return "Llamada finalizada.";
+  } else if (call.name === 'compile_policy') {
+    console.error(`[Policy] 🧠 System is self-configuring based on rule: ${call.args.naturalLanguageRules}`);
+    const result = await apiRequest('POST', '/policy', { 
+      mode: 'COMPILE', 
+      tenantId: AGENT_ID, 
+      naturalLanguageRules: call.args.naturalLanguageRules 
+    });
+    return `Policy compiled successfully. New version: ${result.version || 'unknown'}. Briefly inform the user and continue.`;
+  } else if (call.name === 'start_mission') {
+    console.error(`[Orchestrator] 🚀 Launching Mission: ${call.args.name}`);
+    const result = await apiRequest('POST', '/orchestrator', { 
+        action: 'START_MISSION', 
+        payload: { tasks: call.args.tasks } 
+    });
+    return `Mission '${call.args.name}' launched. WorkflowID: ${result.workflowId || 'pending'}. Inform the user that the tasks are being handled in the background.`;
   }
   return "Herramienta no implementada";
 }
