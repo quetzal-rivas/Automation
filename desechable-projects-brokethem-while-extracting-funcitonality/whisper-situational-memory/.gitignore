@@ -1,9 +1,0 @@
-node_modules/
-package-lock.json
-npm-debug.log*
-
-.env/
-.vscode/
-.env
-.env.local
-mcp-voice-relay/.env
