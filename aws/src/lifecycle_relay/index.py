@@ -35,7 +35,7 @@ def lambda_handler(event, context):
             
         return {
             'statusCode': 200,
-            'body': json.stringify({'success': True, 'message': 'Event logged, no specific reflex triggered'})
+            'body': json.dumps({'success': True, 'message': 'Event logged, no specific reflex triggered'})
         }
 
     except Exception as e:

@@ -1,0 +1,15 @@
+{
+  "name": "mcp-voice-relay",
+  "version": "1.0.0",
+  "description": "MCP Server for Voice Bridge with Gemini Live",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "ws": "^8.16.0",
+    "dotenv": "^16.4.1"
+  }
+}

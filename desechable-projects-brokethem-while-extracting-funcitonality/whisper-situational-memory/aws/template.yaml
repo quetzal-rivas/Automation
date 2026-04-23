@@ -1,0 +1,239 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Production-Grade Agentic Platform Backend'
+
+Parameters:
+  ElevenLabsApiKey:
+    Type: String
+    NoEcho: true
+    Description: ElevenLabs API Key
+  ElevenLabsAgentId:
+    Type: String
+    Description: ElevenLabs Agent/Voice ID
+  ElevenLabsPhoneNumberId:
+    Type: String
+    Description: ElevenLabs Phone Number ID (e.g. phnum_xxxx) for outbound calls
+  UserPhoneNumber:
+    Type: String
+    Description: Your phone number for receiving calls
+  ApiBearerToken:
+    Type: String
+    NoEcho: true
+    Description: Bearer token for API authentication
+  ElevenLabsWebhookSecret:
+    Type: String
+    NoEcho: true
+    Description: Secret for HMAC signature verification from ElevenLabs
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 30
+    Environment:
+      Variables:
+        DYNAMODB_TABLE: !Ref AgentDirectiveTable
+
+Resources:
+  AgentDirectiveTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "agent-directive-hub-${AWS::StackName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: agent_id
+          AttributeType: S
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: elevenlabs_call_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: agent_id
+          KeyType: HASH
+        - AttributeName: session_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: timestamp-index
+          KeySchema:
+            - AttributeName: agent_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: ElevenLabsCallIndex
+          KeySchema:
+            - AttributeName: elevenlabs_call_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # IAM Role for Lambdas
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "AgentDirectiveHubLambdaRole-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: 
+                  - !GetAtt AgentDirectiveTable.Arn
+                  - !Sub "${AgentDirectiveTable.Arn}/index/*"
+        - PolicyName: EventBridgeScheduling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:DeleteRule
+                  - events:RemoveTargets
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/callback-*'
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*'
+              - Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                Resource: '*'
+
+  # SAM uses implicit API creation when you define events. 
+  # But we also have a custom authorizer.
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Auth:
+        DefaultAuthorizer: ApiAuthorizer
+        Authorizers:
+          ApiAuthorizer:
+            FunctionPayloadType: TOKEN
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            Identity:
+              Header: Authorization
+            ReauthorizeEvery: 0
+
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-authorizer-${AWS::StackName}"
+      CodeUri: src/authorizer/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      Environment:
+        Variables:
+          API_BEARER_TOKEN: !Ref ApiBearerToken
+  TriggerCallFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-trigger-call-${AWS::StackName}"
+      CodeUri: src/trigger_call/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          ELEVENLABS_API_KEY: !Ref ElevenLabsApiKey
+          ELEVENLABS_AGENT_ID: !Ref ElevenLabsAgentId
+          ELEVENLABS_PHONE_NUMBER_ID: !Ref ElevenLabsPhoneNumberId
+          USER_PHONE_NUMBER: !Ref UserPhoneNumber
+      Events:
+        TriggerCallApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /trigger-call
+            Method: post
+
+
+  GetStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-get-status-${AWS::StackName}"
+      CodeUri: src/get_status/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        GetStatusApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /get-status
+            Method: get
+
+  WebhookHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-webhook-handler-${AWS::StackName}"
+      CodeUri: src/webhook_handler/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TRIGGER_CALL_FUNCTION_ARN: !GetAtt TriggerCallFunction.Arn
+          ELEVENLABS_WEBHOOK_SECRET: !Ref ElevenLabsWebhookSecret
+          API_BEARER_TOKEN: !Ref ApiBearerToken
+      Events:
+        WebhookApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /webhook
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  GetDirectiveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "agent-directive-get-directive-${AWS::StackName}"
+      CodeUri: src/get_directive/
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        GetDirectiveApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /get-directive
+            Method: get
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+  
+  DynamoDBTableName:
+    Description: DynamoDB table name
+    Value: !Ref AgentDirectiveTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TableName'
